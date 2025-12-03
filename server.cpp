@@ -52,9 +52,109 @@ const string mockTitle = "Mock Message Title";
 const string mockTCPMessage =  mockMessage + fieldDelimiter + mockAuthor + fieldDelimiter + mockTitle + transmissionTerminator;
 
 
-constexpr const char* SERVER_ADDR = "0.0.0.0"; // or "127.0.0.1" or a specific IP (no CIDR)
-constexpr int SERVER_PORT = 27000;
+constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
+constexpr int SERVER_PORT = 26500;
 
+
+/// @brief Sends all bytes in the buffer over the specified socket.
+/// @param socket The socket to send data through.
+/// @param buffer Pointer to the data buffer to send.
+/// @param length The total number of bytes to send.
+/// @param flags Flags to modify the behavior of the send operation.
+/// @return The total number of bytes sent on success, or -1 on error.
+ssize_t send_all_bytes(int socket, const char* buffer, size_t length, int flags)
+{
+    size_t totalSent = 0;
+    while (totalSent < length)
+    {
+        // Perform the send and record the bytes sent
+        ssize_t bytesSent = send(socket, buffer + totalSent, length - totalSent, flags);
+        
+        // If bytes were sent successfully, update the total and continue
+        if(bytesSent > 0)
+        {
+            totalSent += bytesSent; // Update total bytes sent
+            continue;   // Continue sending remaining bytes
+        }
+        
+        // Check if the send was interrupted by a signal issue - if so, retry sending
+        if(bytesSent && errno == EINTR)
+        {
+            continue; // Interrupted by signal, retry sending
+        }
+        
+        // An error occurred during sending
+        std::cerr << "Error sending data: " << strerror(errno) << std::endl;
+        return -1;
+    }
+    return totalSent;
+}
+
+/// @brief Reads data from a socket until a specified terminator string is found.
+/// @param socket The socket to read data from.
+/// @param messageBuffer A buffer that accumulates incoming data.
+/// @param terminator The string that indicates the end of a complete message.
+/// @param completedMessage A string to store the complete message once the terminator is found.
+/// @return True if a complete message was successfully read; false otherwise.
+bool read_message_until_terminator(
+    int socket,
+    std::string& messageBuffer,
+    const std::string& terminator,
+    std::string &completedMessage
+)
+{
+    // Quick check: maybe messageBuffer already contains a full message
+    auto pos = messageBuffer.find(terminator);
+    if (pos != std::string::npos)
+    {
+        // Extract message up to the terminator and remove processed bytes
+        completedMessage = messageBuffer.substr(0, pos);
+        messageBuffer.erase(0, pos + terminator.size());
+        return true;
+    }
+
+    char temp[4096] = {}; // Temporary buffer for receiving data
+    while(true)
+    {
+        ssize_t bytesReceived = recv(socket, temp, sizeof(temp), 0);
+        if (bytesReceived > 0)
+        {
+            // Append received data to the message buffer
+            messageBuffer.append(temp, bytesReceived);
+
+            // Check if the terminator is now present in the buffer
+            auto pos = messageBuffer.find(terminator);
+            if (pos != std::string::npos)
+            {
+                // Extract message up to the terminator and remove processed bytes
+                completedMessage = messageBuffer.substr(0, pos);
+                messageBuffer.erase(0, pos + terminator.size());
+                return true;
+            }
+
+            // No terminator found yet, continue receiving
+            continue;
+        }
+
+        // Check if we received zero bytes - if this occurs before
+        // the terminator is found, the connection has been closed by the client
+        if (bytesReceived == 0)
+        {
+            // Connection has been closed by the peer
+            std::cerr << "Connection closed by peer." << std::endl;
+            return false;
+        }
+
+        // An error occurred during receiving
+        if (errno == EINTR)
+        {
+            continue; // Interrupted by signal, retry receiving
+        }
+
+        std::cerr << "Error receiving data: " << strerror(errno) << std::endl;
+        return false;
+    }
+}
 
 int main()
 {
@@ -63,8 +163,8 @@ int main()
 
     sockaddr_in SvrAddr;        // The server address structure
 
-    char RxBuffer[128] = {};
-    char TxBuffer[128] = {};
+    char RxBuffer[128] = {};    // A buffer to hold received data
+    char TxBuffer[128] = {};    // A buffer to hold data to send
 
     // Setup the server socket for TCP
     ListeningSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
