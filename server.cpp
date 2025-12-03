@@ -17,6 +17,7 @@
 #include <cerrno>
 #include <iostream>
 #include <ctime>
+#include <vector>
 
 using namespace std;
 
@@ -54,26 +55,6 @@ struct ParseResult {
     std::string filter_author;   // for GET_BOARD (optional)
     std::string filter_title;    // for GET_BOARD (optional)
 };
-
-/// @brief Delimits the fields in a message.
-const string fieldDelimiter = "}+{";
-
-/// @brief Terminates a complete message transmission.
-const string transmissionTerminator = "}}&{{";
-
-/// @brief Separates multiple messages in a transmission.
-const string messageSeperator = "}#{";
-
-const string mockCommand = "GET_MESSAGES";
-
-/// @brief Mock message data for testing purposes.
-const string mockMessage = "Hello from the TCP Server! This is a mock message for demonstration purposes.";
-const string mockAuthor = "Mock Skywalker";
-const string mockTitle = "Mock Message Title";
-const string mockTCPMessage =  mockMessage + fieldDelimiter + mockAuthor + fieldDelimiter + mockTitle + transmissionTerminator;
-
-constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
-constexpr int SERVER_PORT = 26500;
 
 /// @brief Sends all bytes in the buffer over the specified socket.
 /// @param socket The socket to send data through.
@@ -177,13 +158,36 @@ bool read_message_until_terminator(
 
 int main()
 {
+    /// @brief Delimits the fields in a message.
+    const string fieldDelimiter = "}+{";
+
+    /// @brief Terminates a complete message transmission.
+    const string transmissionTerminator = "}}&{{";
+
+    /// @brief Separates multiple messages in a transmission.
+    const string messageSeperator = "}#{";
+
+    const string mockCommand = "GET_MESSAGES";
+
+    /// @brief Mock message data for testing purposes.
+    const string mockMessage = "Hello from the TCP Server! This is a mock message for demonstration purposes.";
+    const string mockAuthor = "Mock Skywalker";
+    const string mockTitle = "Mock Message Title";
+    const string mockTCPMessage =  mockMessage + fieldDelimiter + mockAuthor + fieldDelimiter + mockTitle + transmissionTerminator;
+
+    constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
+    constexpr int SERVER_PORT = 26500;
+
     int ListeningSocket;          // The socket used to listen for incoming connections
     int CommunicationSocket;      // The socket used for communication with the client
 
-    sockaddr_in SvrAddr;        // The server address structure
+    std::string RxBuffer;   // A buffer to hold received data - accumulates data until full message is received
+    std::string CompletedMessage;
 
-    char RxBuffer[128] = {};    // A buffer to hold received data
-    char TxBuffer[128] = {};    // A buffer to hold data to send
+    struct sockaddr_in SvrAddr;  // Server address structure
+
+    // char RxBuffer[128] = {};    // A buffer to hold received data
+    // char TxBuffer[128] = {};    // A buffer to hold data to send
 
     // Setup the server socket for TCP
     ListeningSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -228,7 +232,14 @@ int main()
 
     std::cout << "Waiting to receive data from client...\n" << std::endl;
 
-    recv(CommunicationSocket, RxBuffer, sizeof(RxBuffer), 0);
+    //recv(CommunicationSocket, RxBuffer, sizeof(RxBuffer), 0);
+
+    bool result = read_message_until_terminator(
+        CommunicationSocket,
+        RxBuffer,
+        transmissionTerminator,
+        RxBuffer
+    );
    
     std::cout << "Received message from client: " << RxBuffer << std::endl;    
 

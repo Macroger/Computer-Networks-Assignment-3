@@ -1,4 +1,4 @@
-# Message Board — Server / Client (Assignment 3)
+# Message Board — Server (Assignment 3)
 
 ## Overview
 
@@ -14,7 +14,7 @@ Each post/message is represented as a single string that contains three componen
 ## Protocol Summary
 
 - Transport: TCP
-- Default port: `26500` (may be changed to `27000` per team decision)
+- Default port: `26500`
 - Message framing: custom delimiters + explicit end-of-message marker
 
 Delimiter constants used in this project (as discussed by the team):
