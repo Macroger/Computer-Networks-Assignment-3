@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cerrno>
 #include <iostream>
+#include <ctime>
 
 using namespace std;
 
@@ -54,6 +55,15 @@ const string mockTCPMessage =  mockMessage + fieldDelimiter + mockAuthor + field
 
 constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
 constexpr int SERVER_PORT = 26500;
+
+/// @brief Represents a message board post.
+struct Post {
+    int id;                // assigned by server storage
+    std::string author;
+    std::string title;
+    std::string message;
+    std::time_t ts;
+};
 
 
 /// @brief Sends all bytes in the buffer over the specified socket.
