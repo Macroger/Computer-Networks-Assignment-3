@@ -22,6 +22,40 @@ using namespace std;
 constexpr int INVALID_SOCKET = -1;
 constexpr int SOCKET_ERROR = -1;
 
+enum class COMMANDS
+{
+    GET_BOARD,          // A command sent by the client to get the message board
+    POST,               // A command sent by the client to post a new message
+    POST_OK,            // Server sends to client to confirm post was successful
+    POST_ERROR,         // Server sends to client to indicate post was unsuccessful
+    DELETE_POST,        // A command sent by the client to request deletion of a post - NOT IMPLEMENTED
+    UPDATE_POST,        // A command sent by the client to request an update to a post - NOT IMPLEMENTED
+    INVALID_COMMAND,    // Sent by server to client if command is not recognized
+    QUIT                // Client indicates it is done and wants to close the connection
+};
+
+/// @brief Delimits the fields in a message.
+const string fieldDelimiter = "}+{";
+
+/// @brief Terminates a complete message transmission.
+const string transmissionTerminator = "}}&{{";
+
+/// @brief Separates multiple messages in a transmission.
+const string messageSeperator = "}#{";
+
+const string mockCommand = "GET_MESSAGES";
+
+/// @brief Mock message data for testing purposes.
+const string mockMessage = "Hello from the TCP Server! This is a mock message for demonstration purposes.";
+const string mockAuthor = "Mock Skywalker";
+const string mockTitle = "Mock Message Title";
+const string mockTCPMessage =  mockMessage + fieldDelimiter + mockAuthor + fieldDelimiter + mockTitle + transmissionTerminator;
+
+
+constexpr const char* SERVER_ADDR = "0.0.0.0"; // or "127.0.0.1" or a specific IP (no CIDR)
+constexpr int SERVER_PORT = 27000;
+
+
 int main()
 {
     int ListeningSocket;          // The socket used to listen for incoming connections
