@@ -35,6 +35,26 @@ enum class COMMANDS
     QUIT                // Client indicates it is done and wants to close the connection
 };
 
+/// @brief Represents a message board post.
+struct Post {
+    int id;                // assigned by server storage
+    std::string author;
+    std::string title;
+    std::string message;
+    //std::time_t ts;     // timestamp - optional feature, not implemented
+};
+
+/// @brief Represents the result of parsing a client message.
+/// Contains either the parsed command and associated data, or an error message.
+struct ParseResult {
+    bool ok;
+    std::string error;           // non-empty on failure
+    COMMANDS cmd = COMMANDS::INVALID_COMMAND;
+    std::vector<Post> posts;     // for POST
+    std::string filter_author;   // for GET_BOARD (optional)
+    std::string filter_title;    // for GET_BOARD (optional)
+};
+
 /// @brief Delimits the fields in a message.
 const string fieldDelimiter = "}+{";
 
@@ -52,19 +72,8 @@ const string mockAuthor = "Mock Skywalker";
 const string mockTitle = "Mock Message Title";
 const string mockTCPMessage =  mockMessage + fieldDelimiter + mockAuthor + fieldDelimiter + mockTitle + transmissionTerminator;
 
-
 constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
 constexpr int SERVER_PORT = 26500;
-
-/// @brief Represents a message board post.
-struct Post {
-    int id;                // assigned by server storage
-    std::string author;
-    std::string title;
-    std::string message;
-    std::time_t ts;
-};
-
 
 /// @brief Sends all bytes in the buffer over the specified socket.
 /// @param socket The socket to send data through.
