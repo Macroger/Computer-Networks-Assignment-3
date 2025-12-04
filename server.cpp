@@ -54,11 +54,11 @@ const std::unordered_map<std::string_view, CLIENT_COMMANDS> kCmdFromStr{
 
 enum class SERVER_RESPONSES
 {
-    GET_BOARD, // Server sends to client the message board data
+    GET_BOARD,          // Server sends to client the message board data
     POST_OK,            // Server sends to client to confirm post was successful
     POST_ERROR,         // Server sends to client to indicate post was unsuccessful
     GET_BOARD_ERROR,    // Server sends to client to indicate get_board was unsuccessful
-    INVALID_COMMAND    // Sent by server to client if command is not recognized
+    INVALID_COMMAND     // Sent by server to client if command is not recognized
 };
 
 const std::unordered_map<SERVER_RESPONSES, std::string_view> kCmdToStr{
@@ -71,11 +71,9 @@ const std::unordered_map<SERVER_RESPONSES, std::string_view> kCmdToStr{
 
 /// @brief Represents a message board post.
 struct Post {
-    //int id;                // assigned by server storage
     std::string author;
     std::string title;
     std::string message;
-    //std::time_t ts;     // timestamp - optional feature, not implemented
 };
 
 /// @brief In-memory storage for posts.
@@ -91,11 +89,6 @@ struct ParseResult {
     std::string filter_author;   // for GET_BOARD (optional)
     std::string filter_title;    // for GET_BOARD (optional)
 };
-
-// Forward declarations
-std::string handle_post_error(const std::string& errorMessage);
-std::string build_post_ok();
-std::string get_board_handler(const std::string& authorFilter, const std::string& titleFilter);
 
 bool post_handler(const ParseResult& parsed, std::string& errorDetails)
 {
@@ -126,7 +119,6 @@ bool post_handler(const ParseResult& parsed, std::string& errorDetails)
     return true;
 }
 
-
 bool quit_handlder(int SocketToClose)
 {
     // Perform any necessary cleanup for the client session
@@ -137,6 +129,8 @@ bool quit_handlder(int SocketToClose)
     return true;
 }
 
+/// @brief Builds a formatted POST_OK response.
+/// @return 
 std::string build_post_ok()
 {
     // Wire format: "POST_OK}+{}+{}+{}}}&{{"
@@ -194,6 +188,10 @@ static std::vector<std::string> split_fields_until(const std::string& text,const
     return out;
 }
 
+/// @brief Handles the GET_BOARD command, returning the message board with optional filters.
+/// @param authorFilter 
+/// @param titleFilter 
+/// @return A string containing the formatted message board data.
 std::string get_board_handler(const std::string& authorFilter, const std::string& titleFilter)
 {
     // Build a string containing all messages that match optional filters.
@@ -538,14 +536,6 @@ std::string handle_post_error(const std::string& errorMessage)
 #ifndef UNIT_TEST
 int main()
 {
-    const string mockCommand = "GET_MESSAGES";
-
-    /// @brief Mock message data for testing purposes.
-    const string mockMessage = "Hello from the TCP Server! This is a mock message for demonstration purposes.";
-    const string mockAuthor = "Mock Skywalker";
-    const string mockTitle = "Mock Message Title";
-    const string mockTCPMessage =  mockMessage + fieldDelimiter + mockAuthor + fieldDelimiter + mockTitle + transmissionTerminator;
-
     constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
     constexpr int SERVER_PORT = 26500;
 
@@ -553,8 +543,8 @@ int main()
     int CommunicationSocket;      // The socket used for communication with the client
 
     std::string RxBuffer;   // A buffer to hold received data - accumulates data until full message is received
-    std::string CompletedMessage;
-    std::string transmissionString;
+    std::string CompletedMessage; // A complete message once terminator is found
+    std::string transmissionString; // A complete transmission string - the string to be sent back to the client
 
     struct sockaddr_in SvrAddr;  // Server address structure
 
@@ -568,9 +558,9 @@ int main()
     }
 
     // Configure binding settings and bind the socket
-    SvrAddr.sin_family = AF_INET;           // Use the Internet address family
-    SvrAddr.sin_addr.s_addr = INADDR_ANY;   // Accept connections from any address
-    SvrAddr.sin_port = htons(27000);        // Set port to 27000
+    SvrAddr.sin_family = AF_INET;               // Use the Internet address family
+    SvrAddr.sin_addr.s_addr = INADDR_ANY;       // Accept connections from any address
+    SvrAddr.sin_port = htons(SERVER_PORT);      // Set port to 26500
     if (bind(ListeningSocket, (struct sockaddr*)&SvrAddr, sizeof(SvrAddr)) == SOCKET_ERROR)
     {
         close(ListeningSocket);
@@ -586,7 +576,7 @@ int main()
         return 0;
     }
 
-    std::cout << "Server is listening for a connection on port 27000..." << std::endl;
+    std::cout << "Server is listening for a connection on port " << SERVER_PORT << "..." << std::endl;
 
     // Accept a connection on the socket - spin up a new socket for communication
     CommunicationSocket = SOCKET_ERROR;
@@ -627,43 +617,21 @@ int main()
             fieldDelimiter, 
             messageSeperator, 
             transmissionTerminator
-        );
-
-        // Check if client wants to quit
-        if (parsed.ok && parsed.clientCmd == CLIENT_COMMANDS::QUIT) {
-            std::cout << "Client requested disconnect." << std::endl;
-            
-            // Send goodbye message
-            std::string response = "BYE" + transmissionTerminator;
-            send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
-            
-            keepRunning = false;
-            break;
-        }
+        );    
 
         // Handle the request and send response
         handle_client_request(parsed, CommunicationSocket);
 
+        //std::cout << "Received message from client: " << CompletedMessage << std::endl;   
+
         // Clear the completed message for next iteration
         CompletedMessage.clear();
     }
-   
-    std::cout << "Received message from client: " << CompletedMessage << std::endl;   
-    
-    // Here is where we want to take the completed message and process it so we can route it accordingly
 
-
-
-    // Build the transmission string safely using std::string and truncate to 115 characters if needed
-    transmissionString = "Received: " + CompletedMessage.substr(0, 115) + ".";
-
-    std::cout << "Sending '" << transmissionString << "' to client...\n" << std::endl;
-
-    send(CommunicationSocket, transmissionString.c_str(), transmissionString.size(), 0);
-    // Cleanup and close the sockets
-    close(CommunicationSocket);
-    close(ListeningSocket);
-    std::cout << "Server shutdown successfully." << std::endl;
+    // // Cleanup and close the sockets
+    // close(CommunicationSocket);
+    // close(ListeningSocket);
+    // std::cout << "Server shutdown successfully." << std::endl;
     return 0;
 }
 #endif
