@@ -112,7 +112,6 @@ Example GET for the whole board:
 printf 'GET_BOARD}+{ }+{ }}}&{{' | nc localhost 26500
 ```
 
-(Replace `26500` with `27000` if your team standardizes on that port.)
 
 ## Parsing rules (implementation notes)
 
@@ -134,17 +133,12 @@ printf 'GET_BOARD}+{ }+{ }}}&{{' | nc localhost 26500
 
 ## Next Steps / TODOs
 
-- Decide final port: `26500` or `27000`.
-- Improve frame robustness (e.g., length-prefixed messages) if needed.
+- [x] Decide final port: `26500`
 - Add unit tests for parsing and handler logic.
-- Add a simple client program to exercise POST/GET and parsing.
-- Add persistence (file or sqlite) if required by grading rubric.
+- Add persistence (file or sqlite)
 
 ## Contacts
-
-- Project author/owner: Matthew G. Schatz (as in `server.cpp`).
-- Team: server-side and client-side groups — please coordinate on the final message framing and port number before implementing the client.
-
+ - Team Members:
+    - Matthew G. Schatz (as in `server.cpp`).
+    - Kian Cloutier 
 ---
-
-If you want, I can now patch `server.cpp` into a safer sequential server that implements the exact framing described above, or create a small test client tool to exercise these examples. Which do you want next?
