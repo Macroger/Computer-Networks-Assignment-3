@@ -175,6 +175,14 @@ std::string commandToString(COMMANDS cmd)
     }
 }
 
+std::string getBoardString(){
+    return "board file not implented yet; for now enjoy this string";
+};
+
+bool addPostToBoard(std::string post){
+    return true;
+};
+
 int main()
 {
     const string fieldDelimiter = "}+{";
@@ -283,11 +291,12 @@ int main()
             } else if (CompletedMessage.find(commandToString(COMMANDS::GET_BOARD)) == 0) {
                 std::cout << "Client requested the message board." << std::endl;
                 // Display message board; rn just send a message to acknowledge
-                response = "Sending message board... (Not implemented)" + transmissionTerminator;
+                response = getBoardString() + transmissionTerminator;
 
             } else if (CompletedMessage.find(commandToString(COMMANDS::POST)) == 0) {
                 std::cout << "Client is posting a new message." << std::endl;
                 // Post the message to the server's message board; for now just ack
+                addPostToBoard(CompletedMessage);
                 response = "Received post (POST_OK) (Post adding not implemented yet)" + transmissionTerminator;
             } else {
                 std::cout << "Couldn't find command in client message" << std::endl;
