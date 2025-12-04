@@ -156,6 +156,25 @@ bool read_message_until_terminator(
     }
 }
 
+std::string commandToString(COMMANDS cmd)
+{
+    switch (cmd)
+    {
+        case COMMANDS::GET_BOARD:
+            return "GET_BOARD";
+        case COMMANDS::POST:
+            return "POST";
+        case COMMANDS::POST_OK:
+            return "POST_OK";
+        case COMMANDS::POST_ERROR:
+            return "POST_ERROR";
+        case COMMANDS::QUIT:
+            return "QUIT";
+        default:
+            return "INVALID_COMMAND";
+    }
+}
+
 int main()
 {
     const string fieldDelimiter = "}+{";
@@ -253,19 +272,27 @@ int main()
             }
 
             std::cout << "Received message from client: " << CompletedMessage << std::endl;
+            
+            std::string response = "If u seeing this something went wrong lol" + transmissionTerminator;
 
-            if (CompletedMessage.find("QUIT") == 0)
-            {
-                std::cout << "Client requested disconnect." << std::endl;
-                std::string response = "BYE" + transmissionTerminator;
-                send_all_bytes(CommunicationSocket, response.c_str(), response.length(), 0);
+            if (CompletedMessage.find(commandToString(COMMANDS::QUIT)) == 0) {
+                std::cout << "Client requested to close the connection." << std::endl;
+                response = "Closing connection" + transmissionTerminator;
                 clientActive = false;
                 break;
-            }
+            } else if (CompletedMessage.find(commandToString(COMMANDS::GET_BOARD)) == 0) {
+                std::cout << "Client requested the message board." << std::endl;
+                // Display message board; rn just send a message to acknowledge
+                response = "Sending message board... (Not implemented)" + transmissionTerminator;
 
-            std::string response = "SERVER_ACK}+{Received your message}+{" + 
-                                   std::to_string(CompletedMessage.length()) + 
-                                   " bytes}" + transmissionTerminator;
+            } else if (CompletedMessage.find(commandToString(COMMANDS::POST)) == 0) {
+                std::cout << "Client is posting a new message." << std::endl;
+                // Post the message to the server's message board; for now just ack
+                response = "Received post (POST_OK) (Post adding not implemented yet)" + transmissionTerminator;
+            } else {
+                std::cout << "Couldn't find command in client message" << std::endl;
+                response = "Invalid or no command found in message" + transmissionTerminator;
+            }
             
             std::cout << "Sending response to client..." << std::endl;
             
