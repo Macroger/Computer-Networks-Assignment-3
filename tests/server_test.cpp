@@ -214,7 +214,7 @@ TEST_CASE("parse_message - message with separator (single chunk)", "[parse_messa
 
 TEST_CASE("build_post_error - formats error correctly", "[build_post_error]") {
     std::string error = "Invalid author";
-    std::string response = build_post_error(error);
+    std::string response = handle_post_error(error);
     
     REQUIRE(response.find("POST_ERROR") != std::string::npos);
     REQUIRE(response.find(error) != std::string::npos);
@@ -223,7 +223,7 @@ TEST_CASE("build_post_error - formats error correctly", "[build_post_error]") {
 
 TEST_CASE("build_post_error - includes delimiters", "[build_post_error]") {
     std::string error = "Test error";
-    std::string response = build_post_error(error);
+    std::string response = handle_post_error(error);
     
     // Should have format: POST_ERROR}+{}+{}+{error}}&{{
     REQUIRE(response.find("}+{") != std::string::npos);
@@ -245,4 +245,180 @@ TEST_CASE("build_post_ok - includes delimiters and empty fields", "[build_post_o
     
     // Should have format: POST_OK}+{}+{}+{}}&{{
     REQUIRE(response.find("}+{") != std::string::npos);
+}
+
+// ============================================================================
+// TEST SUITE: post_handler
+// ============================================================================
+
+TEST_CASE("post_handler - adds single post to message board", "[post_handler]") {
+    // Clear message board before test
+    messageBoard.clear();
+    
+    // Create a parsed result with one post
+    ParseResult parsed;
+    parsed.ok = true;
+    parsed.clientCmd = CLIENT_COMMANDS::POST;
+    parsed.posts.push_back({"Alice", "Title1", "Message1"});
+    
+    std::string errorDetails;
+    bool success = post_handler(parsed, errorDetails);
+    
+    REQUIRE(success == true);
+    REQUIRE(errorDetails == "");
+    REQUIRE(messageBoard.size() == 1);
+    REQUIRE(messageBoard[0].author == "Alice");
+    REQUIRE(messageBoard[0].title == "Title1");
+    REQUIRE(messageBoard[0].message == "Message1");
+}
+
+TEST_CASE("post_handler - adds multiple posts to message board", "[post_handler]") {
+    messageBoard.clear();
+    
+    ParseResult parsed;
+    parsed.ok = true;
+    parsed.clientCmd = CLIENT_COMMANDS::POST;
+    parsed.posts.push_back({"Alice", "Title1", "Message1"});
+    parsed.posts.push_back({"Bob", "Title2", "Message2"});
+    parsed.posts.push_back({"Charlie", "Title3", "Message3"});
+    
+    std::string errorDetails;
+    bool success = post_handler(parsed, errorDetails);
+    
+    REQUIRE(success == true);
+    REQUIRE(messageBoard.size() == 3);
+    REQUIRE(messageBoard[0].author == "Alice");
+    REQUIRE(messageBoard[1].author == "Bob");
+    REQUIRE(messageBoard[2].author == "Charlie");
+}
+
+TEST_CASE("post_handler - error when no posts provided", "[post_handler]") {
+    messageBoard.clear();
+    
+    ParseResult parsed;
+    parsed.ok = true;
+    parsed.clientCmd = CLIENT_COMMANDS::POST;
+    // parsed.posts is empty
+    
+    std::string errorDetails;
+    bool success = post_handler(parsed, errorDetails);
+    
+    REQUIRE(success == false);
+    REQUIRE(errorDetails.find("No posts to add") != std::string::npos);
+    REQUIRE(messageBoard.size() == 0);  // Nothing added
+}
+
+TEST_CASE("post_handler - handles anonymous posts", "[post_handler]") {
+    messageBoard.clear();
+    
+    ParseResult parsed;
+    parsed.ok = true;
+    parsed.clientCmd = CLIENT_COMMANDS::POST;
+    parsed.posts.push_back({"", "", "Anonymous message"});
+    
+    std::string errorDetails;
+    bool success = post_handler(parsed, errorDetails);
+    
+    REQUIRE(success == true);
+    REQUIRE(messageBoard.size() == 1);
+    REQUIRE(messageBoard[0].author == "");
+    REQUIRE(messageBoard[0].title == "");
+    REQUIRE(messageBoard[0].message == "Anonymous message");
+}
+
+// ============================================================================
+// TEST SUITE: get_board_handler
+// ============================================================================
+
+TEST_CASE("get_board_handler - returns empty board", "[get_board_handler]") {
+    messageBoard.clear();
+    
+    std::string response = get_board_handler("", "");
+    
+    REQUIRE(response.find("GET_BOARD") != std::string::npos);
+    REQUIRE(response.find("}}&{{") != std::string::npos);  // Has terminator
+    // Should only have command and terminator, no posts
+}
+
+TEST_CASE("get_board_handler - returns all posts with no filter", "[get_board_handler]") {
+    messageBoard.clear();
+    messageBoard.push_back({"Alice", "Title1", "Message1"});
+    messageBoard.push_back({"Bob", "Title2", "Message2"});
+    
+    std::string response = get_board_handler("", "");
+    
+    REQUIRE(response.find("GET_BOARD") != std::string::npos);
+    REQUIRE(response.find("Alice") != std::string::npos);
+    REQUIRE(response.find("Message1") != std::string::npos);
+    REQUIRE(response.find("Bob") != std::string::npos);
+    REQUIRE(response.find("Message2") != std::string::npos);
+    REQUIRE(response.find("}}&{{") != std::string::npos);
+}
+
+TEST_CASE("get_board_handler - filters by author", "[get_board_handler]") {
+    messageBoard.clear();
+    messageBoard.push_back({"Alice", "Title1", "Message1"});
+    messageBoard.push_back({"Bob", "Title2", "Message2"});
+    messageBoard.push_back({"Alice", "Title3", "Message3"});
+    
+    std::string response = get_board_handler("Alice", "");
+    
+    REQUIRE(response.find("Alice") != std::string::npos);
+    REQUIRE(response.find("Message1") != std::string::npos);
+    REQUIRE(response.find("Message3") != std::string::npos);
+    REQUIRE(response.find("Bob") == std::string::npos);  // Bob filtered out
+    REQUIRE(response.find("Message2") == std::string::npos);
+}
+
+TEST_CASE("get_board_handler - filters by title", "[get_board_handler]") {
+    messageBoard.clear();
+    messageBoard.push_back({"Alice", "Tutorial", "Message1"});
+    messageBoard.push_back({"Bob", "News", "Message2"});
+    messageBoard.push_back({"Charlie", "Tutorial", "Message3"});
+    
+    std::string response = get_board_handler("", "Tutorial");
+    
+    REQUIRE(response.find("Tutorial") != std::string::npos);
+    REQUIRE(response.find("Alice") != std::string::npos);
+    REQUIRE(response.find("Charlie") != std::string::npos);
+    REQUIRE(response.find("News") == std::string::npos);  // News filtered out
+    REQUIRE(response.find("Bob") == std::string::npos);
+}
+
+TEST_CASE("get_board_handler - filters by both author and title", "[get_board_handler]") {
+    messageBoard.clear();
+    messageBoard.push_back({"Alice", "Tutorial", "Message1"});
+    messageBoard.push_back({"Alice", "News", "Message2"});
+    messageBoard.push_back({"Bob", "Tutorial", "Message3"});
+    
+    std::string response = get_board_handler("Alice", "Tutorial");
+    
+    REQUIRE(response.find("Alice") != std::string::npos);
+    REQUIRE(response.find("Tutorial") != std::string::npos);
+    REQUIRE(response.find("Message1") != std::string::npos);
+    // Should not include Alice+News or Bob+Tutorial
+    REQUIRE(response.find("Message2") == std::string::npos);
+    REQUIRE(response.find("Message3") == std::string::npos);
+}
+
+TEST_CASE("get_board_handler - multiple posts use message separator", "[get_board_handler]") {
+    messageBoard.clear();
+    messageBoard.push_back({"Alice", "Title1", "Message1"});
+    messageBoard.push_back({"Bob", "Title2", "Message2"});
+    
+    std::string response = get_board_handler("", "");
+    
+    // Should have format: GET_BOARD}+{Alice}+{Title1}+{Message1}#{Bob}+{Title2}+{Message2}}&{{
+    REQUIRE(response.find("}#{") != std::string::npos);  // Message separator
+}
+
+TEST_CASE("get_board_handler - no match returns empty board", "[get_board_handler]") {
+    messageBoard.clear();
+    messageBoard.push_back({"Alice", "Title1", "Message1"});
+    
+    std::string response = get_board_handler("Bob", "");  // No Bob posts
+    
+    REQUIRE(response.find("GET_BOARD") != std::string::npos);
+    REQUIRE(response.find("Alice") == std::string::npos);  // Alice filtered out
+    REQUIRE(response.find("}}&{{") != std::string::npos);  // Still has terminator
 }

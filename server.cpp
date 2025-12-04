@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <cerrno>
+#include <exception>
 #include <iostream>
 #include <ctime>
 #include <vector>
@@ -40,28 +41,32 @@ enum class CLIENT_COMMANDS
     GET_BOARD,          // A command sent by the client to get the message board
     POST,                 // A command sent by the client to post a new message
     INVALID_COMMAND,    // Sent by client to server if command is not recognized 
-    //DELETE_POST,        // A command sent by the client to request deletion of a post - NOT IMPLEMENTED
-    //UPDATE_POST,        // A command sent by the client to request an update to a post - NOT IMPLEMENTED
     QUIT                // Client indicates it is done and wants to close the connection
 };
+
 
 const std::unordered_map<std::string_view, CLIENT_COMMANDS> kCmdFromStr{
   {"GET_BOARD", CLIENT_COMMANDS::GET_BOARD},
   {"POST",      CLIENT_COMMANDS::POST},
+  {"INVALID_COMMAND", CLIENT_COMMANDS::INVALID_COMMAND},
   {"QUIT",      CLIENT_COMMANDS::QUIT},
 };
 
 enum class SERVER_RESPONSES
 {
+    GET_BOARD, // Server sends to client the message board data
     POST_OK,            // Server sends to client to confirm post was successful
     POST_ERROR,         // Server sends to client to indicate post was unsuccessful
+    GET_BOARD_ERROR,    // Server sends to client to indicate get_board was unsuccessful
     INVALID_COMMAND    // Sent by server to client if command is not recognized
 };
 
 const std::unordered_map<SERVER_RESPONSES, std::string_view> kCmdToStr{
-  {SERVER_RESPONSES::POST_OK,    "POST_OK"},
-  {SERVER_RESPONSES::POST_ERROR, "POST_ERROR"},
-  {SERVER_RESPONSES::INVALID_COMMAND, "INVALID_COMMAND"},
+    {SERVER_RESPONSES::POST_OK,    "POST_OK"},
+    {SERVER_RESPONSES::POST_ERROR, "POST_ERROR"},
+    {SERVER_RESPONSES::GET_BOARD,  "GET_BOARD"},
+    {SERVER_RESPONSES::GET_BOARD_ERROR, "GET_BOARD_ERROR"},
+    {SERVER_RESPONSES::INVALID_COMMAND, "INVALID_COMMAND"},
 };
 
 /// @brief Represents a message board post.
@@ -73,6 +78,9 @@ struct Post {
     //std::time_t ts;     // timestamp - optional feature, not implemented
 };
 
+/// @brief In-memory storage for posts.
+static std::vector<Post> messageBoard;
+
 /// @brief Represents the result of parsing a client message.
 /// Contains either the parsed command and associated data, or an error message.
 struct ParseResult {
@@ -83,6 +91,70 @@ struct ParseResult {
     std::string filter_author;   // for GET_BOARD (optional)
     std::string filter_title;    // for GET_BOARD (optional)
 };
+
+// Forward declarations
+std::string handle_post_error(const std::string& errorMessage);
+std::string build_post_ok();
+std::string get_board_handler(const std::string& authorFilter, const std::string& titleFilter);
+
+bool post_handler(const ParseResult& parsed, std::string& errorDetails)
+{
+    // Append each post from the parsed result to the message board
+    try{
+        // Check if there are posts to add
+        if (parsed.posts.empty()) {
+            errorDetails = "No posts to add";
+            return false; // No posts to add
+        }
+
+        for (const Post& p : parsed.posts)
+        {
+            messageBoard.push_back(p);
+        }   
+    } 
+    catch (const std::exception& ex) 
+    {
+        errorDetails = std::string("Exception occurred while adding posts: ") + ex.what();
+        return false; // Error occurred while adding posts
+    } 
+    catch (...) 
+    {
+        errorDetails = "Unknown exception occurred while adding posts";
+        return false;
+    }
+
+    return true;
+}
+
+
+bool quit_handlder(int SocketToClose)
+{
+    // Perform any necessary cleanup for the client session
+
+    // Immediately close the socket - since the client requested to quit
+    close(SocketToClose);
+    std::cout << "Server shutdown successfully." << std::endl;
+    return true;
+}
+
+std::string build_post_ok()
+{
+    // Wire format: "POST_OK}+{}+{}+{}}}&{{"
+    string okPost = std::string(kCmdToStr.at(SERVER_RESPONSES::POST_OK));
+
+    std::string author = ""; // No author for OK
+    std::string title = "";  // No title for OK
+    std::string message = ""; // No message for OK
+
+    // Build and return the complete response string
+    string returnResult = 
+        okPost + fieldDelimiter +
+        author + fieldDelimiter +
+        title + fieldDelimiter +
+        message + transmissionTerminator;
+    
+    return returnResult;
+}
 
 /// @brief Splits the input text into fields based on the specified delimiter,
 ///        but only processes up to the specified end position. 
@@ -117,7 +189,39 @@ static std::vector<std::string> split_fields_until(const std::string& text,const
         out.push_back(text.substr(start, p - start));
         start = p + delim.size();
     }
+
+    // Return the collected fields
     return out;
+}
+
+std::string get_board_handler(const std::string& authorFilter, const std::string& titleFilter)
+{
+    // Build a string containing all messages that match optional filters.
+    std::string allMessages;
+    std::string command = std::string(kCmdToStr.at(SERVER_RESPONSES::GET_BOARD));
+
+    allMessages += command; // Start with command
+
+    // For each message in the message board, append it to allMessages in the correct wire format.
+    bool firstPost = true;
+    for (const Post& post : messageBoard)
+    {
+        // Check if the post matches the filters - if not, skip it.
+        if (!authorFilter.empty() && post.author != authorFilter) continue;
+        if (!titleFilter.empty() && post.title != titleFilter) continue;
+        
+        // Add message separator before each post except the first
+        if (!firstPost) {
+            allMessages += messageSeperator;
+        }
+        firstPost = false;
+        
+        allMessages += fieldDelimiter + post.author + fieldDelimiter + post.title + fieldDelimiter + post.message;
+    }
+
+    allMessages += transmissionTerminator; // End with terminator
+
+    return allMessages;
 }
 
 ParseResult parse_message(const std::string& completeMessage,
@@ -342,41 +446,78 @@ bool read_message_until_terminator(
 /// @brief Processes a parsed client message and generates a server response.
 /// @param parsed The ParseResult from parse_message() containing the command and payload.
 /// @return A string response to send back to the client (wire format).
-std::string handle_client_request(const ParseResult& parsed)
+void handle_client_request(const ParseResult& parsed, int CommunicationSocket)
 {
-    // Error checking: if parsing failed, return error response
-    if (!parsed.ok) {
-        // Send back an error response (you may want to define the wire format)
-        string returnResult = "ERROR: " + parsed.error + " " + std::string(kCmdToStr.at(SERVER_RESPONSES::INVALID_COMMAND));
-        return returnResult;
+    // Error checking: if parsing failed, send an error response
+    if (!parsed.ok) 
+    {
+        // Send back an error response
+        std::string emptyAuthor = "";
+        std::string emptyTitle = "";
+        std::string response = "INVALID_COMMAND" + fieldDelimiter + emptyAuthor + fieldDelimiter + emptyTitle + fieldDelimiter + parsed.error + transmissionTerminator;
+        send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
+        return;
     }
 
     // Dispatch based on command type
     switch (parsed.clientCmd) {
-        
-        case CLIENT_COMMANDS::GET_BOARD:
-            // TODO: Call get_board_handler(parsed.filter_author, parsed.filter_title);
-            return "GET_BOARD handler not yet implemented.";
-        
-        case CLIENT_COMMANDS::POST:
-            // TODO: Call post_handler(parsed.posts);
-            return "POST handler not yet implemented.";
-        
-        case CLIENT_COMMANDS::QUIT:
-            // TODO: Call quit_handler();
-            return "QUIT handler not yet implemented.";
-        
+
+        case CLIENT_COMMANDS::GET_BOARD: 
+        {
+            // Call get_board_handler with optional filters - generate a message containing the whole board.
+            std::string response = get_board_handler(parsed.filter_author, parsed.filter_title);
+            send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
+            return;     
+        }
+
+        case CLIENT_COMMANDS::POST: 
+        {
+            std::string errorMessage;
+            bool result = post_handler(parsed, errorMessage);
+            if(result == false)
+            {
+                // Build and send POST_ERROR response
+                std::string response = handle_post_error(errorMessage);
+                send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
+            }
+            else
+            {
+                // Build and send POST_OK response
+                std::string response = build_post_ok();
+                send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
+            }
+            return;
+        }
+
+        case CLIENT_COMMANDS::QUIT: 
+        {
+            std::string emptyAuthor = "";
+            std::string emptyTitle = "";
+            std::string message = "BYE!";
+
+            std::string response = "QUIT" + fieldDelimiter + emptyAuthor + fieldDelimiter + emptyTitle + fieldDelimiter + message + transmissionTerminator;
+            send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
+            close(CommunicationSocket);  // ← Server sends FIN after response
+            return;
+        }
+
         case CLIENT_COMMANDS::INVALID_COMMAND:
-        default:
-            // Should not reach here if parse_message() is correct
-            return std::string(kCmdToStr.at(SERVER_RESPONSES::INVALID_COMMAND));
+        default: {
+            std::string emptyAuthor = "";
+            std::string emptyTitle = "";
+            std::string message = "Error, unable to interpret command - make sure to use accepted legitimate commands!";
+
+            std::string response = "INVALID_COMMAND" + fieldDelimiter + emptyAuthor + fieldDelimiter + emptyTitle + fieldDelimiter + message + transmissionTerminator;
+            send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
+            return;
+        }
     }
 }
 
 /// @brief Builds a formatted POST_ERROR response.
 /// @param errorMessage The error description to include.
 /// @return A wire-format error response ready to send to client.
-std::string build_post_error(const std::string& errorMessage) 
+std::string handle_post_error(const std::string& errorMessage) 
 {
     // Wire format: "POST_ERROR}+{error_message}}&{{"
     string errorPost = std::string(kCmdToStr.at(SERVER_RESPONSES::POST_ERROR));
@@ -390,31 +531,9 @@ std::string build_post_error(const std::string& errorMessage)
         emptyAuthor + fieldDelimiter +
         emptyTitle + fieldDelimiter +
         errorMessage + transmissionTerminator;
-    
     return returnResult;
 }
-
-
-/// @brief Builds a formatted POST_OK response.
-/// @return A string in TCP transmission format indicating a successful post.
-std::string build_post_ok() 
-{
-    // Wire format: "POST_OK}}&{{"
-    string okPost = std::string(kCmdToStr.at(SERVER_RESPONSES::POST_OK));
-
-    std::string emptyAuthor = ""; // No author for OK
-    std::string emptyTitle = "";  // No title for OK
-    std::string emptyMessage = ""; // No message for OK
-
-    // Build and return the complete response string
-    string returnResult = 
-        okPost + fieldDelimiter +
-        emptyAuthor + fieldDelimiter +
-        emptyTitle + fieldDelimiter +
-        emptyMessage + transmissionTerminator;
     
-    return returnResult;
-}
 
 #ifndef UNIT_TEST
 int main()
@@ -480,22 +599,60 @@ int main()
     
     std::cout << "Client connected successfully!\n" << std::endl;    
 
-    std::cout << "Waiting to receive data from client...\n" << std::endl;
+    bool keepRunning = true;
 
-    //recv(CommunicationSocket, RxBuffer, sizeof(RxBuffer), 0);
+    while (keepRunning) {
+        std::cout << "Waiting to receive data from client...\n" << std::endl;
 
-    bool result = read_message_until_terminator(
-        CommunicationSocket,
-        RxBuffer,
-        transmissionTerminator,
-        CompletedMessage
-    );
+        // Read a complete message
+        bool result = read_message_until_terminator(
+            CommunicationSocket,
+            RxBuffer,
+            transmissionTerminator,
+            CompletedMessage
+        );
 
-    if(result )
+        // Connection closed or error - exit loop
+        if (!result) {
+            std::cout << "Connection closed or error reading message." << std::endl;
+            keepRunning = false;
+            break;
+        }
+
+        std::cout << "Received message from client: " << CompletedMessage << std::endl;
+
+        // Parse the message
+        ParseResult parsed = parse_message(
+            CompletedMessage, 
+            fieldDelimiter, 
+            messageSeperator, 
+            transmissionTerminator
+        );
+
+        // Check if client wants to quit
+        if (parsed.ok && parsed.clientCmd == CLIENT_COMMANDS::QUIT) {
+            std::cout << "Client requested disconnect." << std::endl;
+            
+            // Send goodbye message
+            std::string response = "BYE" + transmissionTerminator;
+            send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
+            
+            keepRunning = false;
+            break;
+        }
+
+        // Handle the request and send response
+        handle_client_request(parsed, CommunicationSocket);
+
+        // Clear the completed message for next iteration
+        CompletedMessage.clear();
+    }
    
     std::cout << "Received message from client: " << CompletedMessage << std::endl;   
     
     // Here is where we want to take the completed message and process it so we can route it accordingly
+
+
 
     // Build the transmission string safely using std::string and truncate to 115 characters if needed
     transmissionString = "Received: " + CompletedMessage.substr(0, 115) + ".";
