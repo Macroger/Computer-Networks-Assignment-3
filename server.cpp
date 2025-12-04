@@ -1,7 +1,7 @@
 /*
 ** Filename: server.cpp
 ** Project: Computer Networks Assignment 3
-** Author: Matthew G. Schatz
+** Author: Matthew G. Schatz, Kian Cloutier
 ** Description: This is a TCP server that works as a message board. It listens for incomming connections
 **              from clients, receives a request message, and sends back a response to the client containing
 **              the requested resource(s).
@@ -158,104 +158,143 @@ bool read_message_until_terminator(
 
 int main()
 {
-    /// @brief Delimits the fields in a message.
     const string fieldDelimiter = "}+{";
-
-    /// @brief Terminates a complete message transmission.
     const string transmissionTerminator = "}}&{{";
-
-    /// @brief Separates multiple messages in a transmission.
     const string messageSeperator = "}#{";
-
     const string mockCommand = "GET_MESSAGES";
-
-    /// @brief Mock message data for testing purposes.
     const string mockMessage = "Hello from the TCP Server! This is a mock message for demonstration purposes.";
     const string mockAuthor = "Mock Skywalker";
     const string mockTitle = "Mock Message Title";
     const string mockTCPMessage =  mockMessage + fieldDelimiter + mockAuthor + fieldDelimiter + mockTitle + transmissionTerminator;
 
-    constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
+    constexpr const char* SERVER_ADDR = "0.0.0.0";
     constexpr int SERVER_PORT = 26500;
 
-    int ListeningSocket;          // The socket used to listen for incoming connections
-    int CommunicationSocket;      // The socket used for communication with the client
+    int ListeningSocket;
+    int CommunicationSocket;
 
-    std::string RxBuffer;   // A buffer to hold received data - accumulates data until full message is received
+    std::string RxBuffer;
     std::string CompletedMessage;
 
-    struct sockaddr_in SvrAddr;  // Server address structure
+    struct sockaddr_in SvrAddr;
+    struct sockaddr_in ClientAddr;
+    socklen_t ClientAddrLen = sizeof(ClientAddr);
 
-    // char RxBuffer[128] = {};    // A buffer to hold received data
-    // char TxBuffer[128] = {};    // A buffer to hold data to send
-
-    // Setup the server socket for TCP
     ListeningSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (ListeningSocket == INVALID_SOCKET)
     {
-        std::cout << "Socket creation failed with error: " << strerror(errno) << std::endl;
-        close(ListeningSocket);
-        return 0;
+        std::cerr << "Socket creation failed with error: " << strerror(errno) << std::endl;
+        return 1;
     }
 
-    // Configure binding settings and bind the socket
-    SvrAddr.sin_family = AF_INET;           // Use the Internet address family
-    SvrAddr.sin_addr.s_addr = INADDR_ANY;   // Accept connections from any address
-    SvrAddr.sin_port = htons(27000);        // Set port to 27000
+    int opt = 1;
+    if (setsockopt(ListeningSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == SOCKET_ERROR)
+    {
+        std::cerr << "WARNING: Failed to set SO_REUSEADDR: " << strerror(errno) << std::endl;
+    }
+
+    std::memset(&SvrAddr, 0, sizeof(SvrAddr));
+    SvrAddr.sin_family = AF_INET;
+    SvrAddr.sin_addr.s_addr = INADDR_ANY;
+    SvrAddr.sin_port = htons(SERVER_PORT);
     if (bind(ListeningSocket, (struct sockaddr*)&SvrAddr, sizeof(SvrAddr)) == SOCKET_ERROR)
     {
+        std::cerr << "ERROR: Failed to bind ServerSocket: " << strerror(errno) << std::endl;
         close(ListeningSocket);
-        std::cout << "ERROR: Failed to bind ServerSocket" << strerror(errno) << std::endl;
-        return 0;
+        return 1;
     }
 
-    // Start listening on the configured socket
-    if (listen(ListeningSocket, 1) == SOCKET_ERROR)
+    if (listen(ListeningSocket, 5) == SOCKET_ERROR)
     {
+        std::cerr << "ERROR: Failed to configure listen on ServerSocket: " << strerror(errno) << std::endl;
         close(ListeningSocket);
-        std::cout << "ERROR: Failed to configure listen on ServerSocket" << strerror(errno)<< std::endl;
-        return 0;
+        return 1;
     }
 
-    std::cout << "Server is listening for a connection on port 27000..." << std::endl;
+    std::cout << "Server is listening for a connection on port " << SERVER_PORT << "..." << std::endl;
 
-    // Accept a connection on the socket - spin up a new socket for communication
-    CommunicationSocket = SOCKET_ERROR;
-    if ((CommunicationSocket = accept(ListeningSocket, NULL, NULL)) == SOCKET_ERROR)
+    while (true)
     {
-        close(ListeningSocket);
-        std::cout << "ERROR: Failed to accept connection on ServerSocket" << strerror(errno) << std::endl;
-        return 0;
+        std::cout << "\nWaiting for client connection..." << std::endl;
+
+        CommunicationSocket = accept(ListeningSocket, (struct sockaddr*)&ClientAddr, &ClientAddrLen);
+        if (CommunicationSocket == SOCKET_ERROR)
+        {
+            std::cerr << "ERROR: Failed to accept connection on ServerSocket: " << strerror(errno) << std::endl;
+            continue;
+        }
+        
+        char clientIP[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &ClientAddr.sin_addr, clientIP, INET_ADDRSTRLEN);
+        int clientPort = ntohs(ClientAddr.sin_port);
+        
+        std::cout << "Client connected: " << clientIP << ":" << clientPort << std::endl;
+
+        RxBuffer.clear();
+        CompletedMessage.clear();
+
+        bool clientActive = true;
+        while (clientActive)
+        {
+            std::cout << "Waiting to receive data from client..." << std::endl;
+
+            bool receiveSuccess = read_message_until_terminator(
+                CommunicationSocket,
+                RxBuffer,
+                transmissionTerminator,
+                CompletedMessage
+            );
+           
+            if (!receiveSuccess)
+            {
+                std::cerr << "Failed to receive complete message from client. Closing connection." << std::endl;
+                clientActive = false;
+                break;
+            }
+
+            std::cout << "Received message from client: " << CompletedMessage << std::endl;
+
+            if (CompletedMessage.find("QUIT") == 0)
+            {
+                std::cout << "Client requested disconnect." << std::endl;
+                std::string response = "BYE" + transmissionTerminator;
+                send_all_bytes(CommunicationSocket, response.c_str(), response.length(), 0);
+                clientActive = false;
+                break;
+            }
+
+            std::string response = "SERVER_ACK}+{Received your message}+{" + 
+                                   std::to_string(CompletedMessage.length()) + 
+                                   " bytes}" + transmissionTerminator;
+            
+            std::cout << "Sending response to client..." << std::endl;
+            
+            ssize_t bytesSent = send_all_bytes(
+                CommunicationSocket, 
+                response.c_str(), 
+                response.length(), 
+                0
+            );
+
+            if (bytesSent == -1)
+            {
+                std::cerr << "Failed to send response to client. Closing connection." << std::endl;
+                clientActive = false;
+                break;
+            }
+
+            std::cout << "Response sent successfully (" << bytesSent << " bytes)." << std::endl;
+            
+            CompletedMessage.clear();
+        }
+
+        std::cout << "Closing connection with " << clientIP << ":" << clientPort << std::endl;
+        close(CommunicationSocket);
+        std::cout << "Connection closed." << std::endl;
     }
-    
-    std::cout << "Client connected successfully!\n" << std::endl;    
 
-    std::cout << "Waiting to receive data from client...\n" << std::endl;
-
-    //recv(CommunicationSocket, RxBuffer, sizeof(RxBuffer), 0);
-
-    bool result = read_message_until_terminator(
-        CommunicationSocket,
-        RxBuffer,
-        transmissionTerminator,
-        RxBuffer
-    );
-   
-    std::cout << "Received message from client: " << RxBuffer << std::endl;    
-
-    snprintf(TxBuffer, sizeof(TxBuffer), "Received: %.115s.", RxBuffer);
-
-	std::cout << "Sending '" << TxBuffer << "' to client...\n" << std::endl;
-
-    send(CommunicationSocket, TxBuffer, sizeof(TxBuffer), 0);
-
-    // Cleanup and close the sockets
-    close(CommunicationSocket);
     close(ListeningSocket);
     std::cout << "Server shutdown successfully." << std::endl;
     return 0;
 }
-
-
-
 

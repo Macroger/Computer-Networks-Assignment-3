@@ -144,7 +144,3 @@ printf 'GET_BOARD}+{ }+{ }}}&{{' | nc localhost 26500
 
 - Project author/owner: Matthew G. Schatz (as in `server.cpp`).
 - Team: server-side and client-side groups — please coordinate on the final message framing and port number before implementing the client.
-
----
-
-If you want, I can now patch `server.cpp` into a safer sequential server that implements the exact framing described above, or create a small test client tool to exercise these examples. Which do you want next?
