@@ -1093,14 +1093,16 @@ void server_run_loop()
         // Build goodbye message in wire format
         std::string goodbyeMessage = "SERVER" + fieldDelimiter + "SHUTDOWN" + fieldDelimiter + "Server is shutting down" + transmissionTerminator;
         
-        // Send goodbye message multiple times to increase delivery probability
-        // TCP can lose packets even though it's reliable, so repetition helps
+        // Send goodbye message multiple times to increase likelihood client threads receive it
+        // Not because TCP is unreliable (it guarantees delivery), but because:
+        // 1. Client handler threads may be blocked on recv() and need time to process
+        // 2. We're about to close sockets forcefully, which can interrupt in-flight data
         for (int attempt = 0; attempt < 3; attempt++) {
             for (int clientSocket : clientsToDisconnect) {
                 send_all_bytes(clientSocket, goodbyeMessage.c_str(), goodbyeMessage.size(), 0);
             }
             
-            // Add delay between attempts to allow processing
+            // Add delay between attempts to allow client threads time to process
             if (attempt < 2) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
