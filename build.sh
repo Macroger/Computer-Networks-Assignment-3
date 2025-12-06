@@ -104,8 +104,9 @@ build_gui() {
         FTXUI_FLAGS="-I${FTXUI_INCLUDE} -L${FTXUI_LIB} -lftxui-component -lftxui-dom -lftxui-screen"
     fi
     
-    # Compile with FTXUI flags
-    g++ -std=c++17 -Wall -Wextra server_gui.cpp $FTXUI_FLAGS -o "${BUILD_DIR}/server_gui"
+    # Compile with FTXUI flags and shared state support
+    # Only include server.cpp for shared_state.h definition (no main function)
+    g++ -std=c++17 -Wall -Wextra -DGUI_BUILD server_gui.cpp server.cpp $FTXUI_FLAGS -o "${BUILD_DIR}/server_gui" 2>&1 | grep -v "undefined reference to .main."
     
     if [ $? -eq 0 ]; then
         print_success "GUI built successfully: ${BUILD_DIR}/server_gui"

@@ -1,5 +1,6 @@
 #define CATCH_CONFIG_MAIN
 #include "catch2/catch.hpp"
+#include "../shared_state.h"
 #include "../server.cpp"  // Include server implementation
 
 // ============================================================================
@@ -258,7 +259,7 @@ TEST_CASE("build_post_ok - includes delimiters and empty fields", "[build_post_o
 
 TEST_CASE("post_handler - adds single post to message board", "[post_handler]") {
     // Clear message board before test
-    messageBoard.clear();
+    g_serverState.messageBoard.clear();
     
     // Create a parsed result with one post
     ParseResult parsed;
@@ -271,14 +272,14 @@ TEST_CASE("post_handler - adds single post to message board", "[post_handler]") 
     
     REQUIRE(success == true);
     REQUIRE(errorDetails == "");
-    REQUIRE(messageBoard.size() == 1);
-    REQUIRE(messageBoard[0].author == "Alice");
-    REQUIRE(messageBoard[0].title == "Title1");
-    REQUIRE(messageBoard[0].message == "Message1");
+    REQUIRE(g_serverState.messageBoard.size() == 1);
+    REQUIRE(g_serverState.messageBoard[0].author == "Alice");
+    REQUIRE(g_serverState.messageBoard[0].title == "Title1");
+    REQUIRE(g_serverState.messageBoard[0].message == "Message1");
 }
 
 TEST_CASE("post_handler - adds multiple posts to message board", "[post_handler]") {
-    messageBoard.clear();
+    g_serverState.messageBoard.clear();
     
     ParseResult parsed;
     parsed.ok = true;
@@ -291,14 +292,14 @@ TEST_CASE("post_handler - adds multiple posts to message board", "[post_handler]
     bool success = post_handler(parsed, errorDetails);
     
     REQUIRE(success == true);
-    REQUIRE(messageBoard.size() == 3);
-    REQUIRE(messageBoard[0].author == "Alice");
-    REQUIRE(messageBoard[1].author == "Bob");
-    REQUIRE(messageBoard[2].author == "Charlie");
+    REQUIRE(g_serverState.messageBoard.size() == 3);
+    REQUIRE(g_serverState.messageBoard[0].author == "Alice");
+    REQUIRE(g_serverState.messageBoard[1].author == "Bob");
+    REQUIRE(g_serverState.messageBoard[2].author == "Charlie");
 }
 
 TEST_CASE("post_handler - error when no posts provided", "[post_handler]") {
-    messageBoard.clear();
+    g_serverState.messageBoard.clear();
     
     ParseResult parsed;
     parsed.ok = true;
@@ -310,11 +311,11 @@ TEST_CASE("post_handler - error when no posts provided", "[post_handler]") {
     
     REQUIRE(success == false);
     REQUIRE(errorDetails.find("No posts to add") != std::string::npos);
-    REQUIRE(messageBoard.size() == 0);  // Nothing added
+    REQUIRE(g_serverState.messageBoard.size() == 0);  // Nothing added
 }
 
 TEST_CASE("post_handler - handles anonymous posts", "[post_handler]") {
-    messageBoard.clear();
+    g_serverState.messageBoard.clear();
     
     ParseResult parsed;
     parsed.ok = true;
@@ -325,10 +326,10 @@ TEST_CASE("post_handler - handles anonymous posts", "[post_handler]") {
     bool success = post_handler(parsed, errorDetails);
     
     REQUIRE(success == true);
-    REQUIRE(messageBoard.size() == 1);
-    REQUIRE(messageBoard[0].author == "");
-    REQUIRE(messageBoard[0].title == "");
-    REQUIRE(messageBoard[0].message == "Anonymous message");
+    REQUIRE(g_serverState.messageBoard.size() == 1);
+    REQUIRE(g_serverState.messageBoard[0].author == "");
+    REQUIRE(g_serverState.messageBoard[0].title == "");
+    REQUIRE(g_serverState.messageBoard[0].message == "Anonymous message");
 }
 
 // ============================================================================
@@ -336,7 +337,7 @@ TEST_CASE("post_handler - handles anonymous posts", "[post_handler]") {
 // ============================================================================
 
 TEST_CASE("get_board_handler - returns empty board", "[get_board_handler]") {
-    messageBoard.clear();
+    g_serverState.messageBoard.clear();
     
     std::string response = get_board_handler("", "");
     
@@ -346,9 +347,9 @@ TEST_CASE("get_board_handler - returns empty board", "[get_board_handler]") {
 }
 
 TEST_CASE("get_board_handler - returns all posts with no filter", "[get_board_handler]") {
-    messageBoard.clear();
-    messageBoard.push_back({"Alice", "Title1", "Message1"});
-    messageBoard.push_back({"Bob", "Title2", "Message2"});
+    g_serverState.messageBoard.clear();
+    g_serverState.messageBoard.push_back({"Alice", "Title1", "Message1"});
+    g_serverState.messageBoard.push_back({"Bob", "Title2", "Message2"});
     
     std::string response = get_board_handler("", "");
     
@@ -361,10 +362,10 @@ TEST_CASE("get_board_handler - returns all posts with no filter", "[get_board_ha
 }
 
 TEST_CASE("get_board_handler - filters by author", "[get_board_handler]") {
-    messageBoard.clear();
-    messageBoard.push_back({"Alice", "Title1", "Message1"});
-    messageBoard.push_back({"Bob", "Title2", "Message2"});
-    messageBoard.push_back({"Alice", "Title3", "Message3"});
+    g_serverState.messageBoard.clear();
+    g_serverState.messageBoard.push_back({"Alice", "Title1", "Message1"});
+    g_serverState.messageBoard.push_back({"Bob", "Title2", "Message2"});
+    g_serverState.messageBoard.push_back({"Alice", "Title3", "Message3"});
     
     std::string response = get_board_handler("Alice", "");
     
@@ -376,10 +377,10 @@ TEST_CASE("get_board_handler - filters by author", "[get_board_handler]") {
 }
 
 TEST_CASE("get_board_handler - filters by title", "[get_board_handler]") {
-    messageBoard.clear();
-    messageBoard.push_back({"Alice", "Tutorial", "Message1"});
-    messageBoard.push_back({"Bob", "News", "Message2"});
-    messageBoard.push_back({"Charlie", "Tutorial", "Message3"});
+    g_serverState.messageBoard.clear();
+    g_serverState.messageBoard.push_back({"Alice", "Tutorial", "Message1"});
+    g_serverState.messageBoard.push_back({"Bob", "News", "Message2"});
+    g_serverState.messageBoard.push_back({"Charlie", "Tutorial", "Message3"});
     
     std::string response = get_board_handler("", "Tutorial");
     
@@ -391,10 +392,10 @@ TEST_CASE("get_board_handler - filters by title", "[get_board_handler]") {
 }
 
 TEST_CASE("get_board_handler - filters by both author and title", "[get_board_handler]") {
-    messageBoard.clear();
-    messageBoard.push_back({"Alice", "Tutorial", "Message1"});
-    messageBoard.push_back({"Alice", "News", "Message2"});
-    messageBoard.push_back({"Bob", "Tutorial", "Message3"});
+    g_serverState.messageBoard.clear();
+    g_serverState.messageBoard.push_back({"Alice", "Tutorial", "Message1"});
+    g_serverState.messageBoard.push_back({"Alice", "News", "Message2"});
+    g_serverState.messageBoard.push_back({"Bob", "Tutorial", "Message3"});
     
     std::string response = get_board_handler("Alice", "Tutorial");
     
@@ -407,9 +408,9 @@ TEST_CASE("get_board_handler - filters by both author and title", "[get_board_ha
 }
 
 TEST_CASE("get_board_handler - multiple posts use message separator", "[get_board_handler]") {
-    messageBoard.clear();
-    messageBoard.push_back({"Alice", "Title1", "Message1"});
-    messageBoard.push_back({"Bob", "Title2", "Message2"});
+    g_serverState.messageBoard.clear();
+    g_serverState.messageBoard.push_back({"Alice", "Title1", "Message1"});
+    g_serverState.messageBoard.push_back({"Bob", "Title2", "Message2"});
     
     std::string response = get_board_handler("", "");
     
@@ -418,8 +419,8 @@ TEST_CASE("get_board_handler - multiple posts use message separator", "[get_boar
 }
 
 TEST_CASE("get_board_handler - no match returns empty board", "[get_board_handler]") {
-    messageBoard.clear();
-    messageBoard.push_back({"Alice", "Title1", "Message1"});
+    g_serverState.messageBoard.clear();
+    g_serverState.messageBoard.push_back({"Alice", "Title1", "Message1"});
     
     std::string response = get_board_handler("Bob", "");  // No Bob posts
     

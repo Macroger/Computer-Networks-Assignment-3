@@ -23,8 +23,12 @@
 #include <string_view>
 #include <thread>
 #include <mutex>
+#include "shared_state.h"
 
 using namespace std;
+
+// Instantiate global shared state
+SharedServerState g_serverState;
 
 constexpr int INVALID_SOCKET = -1;
 constexpr int SOCKET_ERROR = -1;
@@ -71,19 +75,6 @@ const std::unordered_map<SERVER_RESPONSES, std::string_view> kCmdToStr{
     {SERVER_RESPONSES::INVALID_COMMAND, "INVALID_COMMAND"},
 };
 
-/// @brief Represents a message board post.
-struct Post {
-    std::string author;
-    std::string title;
-    std::string message;
-};
-
-/// @brief In-memory storage for posts.
-static std::vector<Post> messageBoard;
-
-/// @brief Mutex to protect access to messageBoard from multiple threads
-static std::mutex messageBoardMutex;
-
 /// @brief Represents the result of parsing a client message.
 /// Contains either the parsed command and associated data, or an error message.
 struct ParseResult {
@@ -110,7 +101,7 @@ bool post_handler(const ParseResult& parsed, std::string& errorDetails)
         }
 
         // Lock the mutex to ensure thread-safe access to messageBoard
-        std::lock_guard<std::mutex> lock(messageBoardMutex);
+        std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
 
         for (size_t i = 0; i < parsed.posts.size(); i++)
         {
@@ -118,10 +109,11 @@ bool post_handler(const ParseResult& parsed, std::string& errorDetails)
             std::cout << "  Adding Post " << i << ": Author=\"" << p.author 
                       << "\" Title=\"" << p.title 
                       << "\" Message=\"" << p.message << "\"" << std::endl;
-            messageBoard.push_back(p);
+            g_serverState.messageBoard.push_back(p);
+            g_serverState.totalMessagesReceived++;
         }
         
-        std::cout << "Total posts in messageBoard after adding: " << messageBoard.size() << std::endl;
+        std::cout << "Total posts in messageBoard after adding: " << g_serverState.messageBoard.size() << std::endl;
         std::cout << "==========================\n" << std::endl;
     } 
     catch (const std::exception& ex) 
@@ -214,15 +206,15 @@ static std::vector<std::string> split_fields_until(const std::string& text,const
 std::string get_board_handler(const std::string& authorFilter, const std::string& titleFilter)
 {
     // Lock the mutex to ensure thread-safe access to messageBoard
-    std::lock_guard<std::mutex> lock(messageBoardMutex);
+    std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
     
     // DEBUG: Print what's in messageBoard
     std::cout << "\n=== GET_BOARD_HANDLER DEBUG ===" << std::endl;
-    std::cout << "Total posts in messageBoard: " << messageBoard.size() << std::endl;
-    for (size_t i = 0; i < messageBoard.size(); i++) {
-        std::cout << "  Post " << i << ": Author=\"" << messageBoard[i].author 
-                  << "\" Title=\"" << messageBoard[i].title 
-                  << "\" Message=\"" << messageBoard[i].message << "\"" << std::endl;
+    std::cout << "Total posts in messageBoard: " << g_serverState.messageBoard.size() << std::endl;
+    for (size_t i = 0; i < g_serverState.messageBoard.size(); i++) {
+        std::cout << "  Post " << i << ": Author=\"" << g_serverState.messageBoard[i].author 
+                  << "\" Title=\"" << g_serverState.messageBoard[i].title 
+                  << "\" Message=\"" << g_serverState.messageBoard[i].message << "\"" << std::endl;
     }
     std::cout << "Filters: Author=\"" << authorFilter << "\" Title=\"" << titleFilter << "\"" << std::endl;
     
@@ -235,7 +227,7 @@ std::string get_board_handler(const std::string& authorFilter, const std::string
     // For each message in the message board, append it to allMessages in the correct wire format.
     bool firstPost = true;
     int postsIncluded = 0;
-    for (const Post& post : messageBoard)
+    for (const Post& post : g_serverState.messageBoard)
     {
         // Check if the post matches the filters - if not, skip it.
         if (!authorFilter.empty() && post.author != authorFilter) continue;
@@ -595,6 +587,9 @@ void client_handler(int CommunicationSocket)
     std::string CompletedMessage; // A complete message once terminator is found
     bool keepRunning = true;
 
+    // Increment active connections
+    g_serverState.activeConnections++;
+
     std::cout << "Client handler started for socket " << CommunicationSocket << std::endl;
 
     while (keepRunning) {
@@ -649,6 +644,10 @@ void client_handler(int CommunicationSocket)
 
     // Cleanup and close the socket for this client
     close(CommunicationSocket);
+    
+    // Decrement active connections
+    g_serverState.activeConnections--;
+    
     std::cout << "Client handler for socket " << CommunicationSocket << " shutting down." << std::endl;
 }
 

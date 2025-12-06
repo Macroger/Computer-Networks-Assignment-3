@@ -1,79 +1,111 @@
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/dom/elements.hpp>
 #include <vector>
 #include <string>
+#include <thread>
+#include <chrono>
+#include "shared_state.h"
 
 using namespace ftxui;
-
-struct Message {
-  std::string author;
-  std::string content;
-};
 
 int main() {
   auto screen = ScreenInteractive::TerminalOutput();
 
-  // Sample data
-  std::vector<Message> messages = {
-    {"Alice", "Hello everyone!"},
-    {"Bob", "This is a test message."},
-    {"Charlie", "FTXUI makes console apps fun!"}
-  };
+  // Server stats that will update from shared state
+  int messageCount = 0;
+  int activeClients = 0;
+  int totalReceived = 0;
 
-  // Log entries
-  std::vector<std::string> logs = {
-    "Server started",
-    "Client connected: Alice",
-    "Message received from Bob"
-  };
-
-  // Buttons
+  // Button actions
   bool running = true;
-  auto new_post_button = Button("New Post", [&] { logs.push_back("New post triggered"); });
-  auto refresh_button = Button("Refresh", [&] { logs.push_back("Messages refreshed"); });
-  auto quit_button = Button("Quit", [&] { logs.push_back("Server shutting down"); running = false; screen.Exit(); });
-
-  auto sidebar = Container::Vertical({
-    new_post_button,
-    refresh_button,
-    quit_button
+  auto shutdown_button = Button("Shutdown Server", [&] { 
+    g_serverState.serverRunning = false;
+    running = false;
+    screen.Exit(); 
   });
 
+  auto sidebar = Container::Vertical({
+    shutdown_button
+  });
+
+  // Create a renderer that continuously updates from shared state
   auto renderer = Renderer(sidebar, [&] {
-    // Render message list
+    // Lock and read from shared state
+    {
+      std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
+      messageCount = g_serverState.messageBoard.size();
+      activeClients = g_serverState.activeConnections;
+      totalReceived = g_serverState.totalMessagesReceived;
+    }
+
+    // Build message board display
     Elements message_elements;
-    for (auto& msg : messages) {
-      message_elements.push_back(
-        vbox({
-          text("Author: " + msg.author) | bold,
-          text(msg.content),
-          separator()
-        }) | border
-      );
+    {
+      std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
+      
+      if (g_serverState.messageBoard.empty()) {
+        message_elements.push_back(text("(No messages yet)") | dim);
+      } else {
+        for (const auto& post : g_serverState.messageBoard) {
+          message_elements.push_back(
+            vbox({
+              text("Author: " + (post.author.empty() ? "(anonymous)" : post.author)) | bold,
+              text("Title: " + post.title),
+              text("Message: " + post.message),
+              separator()
+            }) | border
+          );
+        }
+      }
     }
 
-    // Render logs
-    Elements log_elements;
-    for (auto& log : logs) {
-      log_elements.push_back(text(log));
-    }
-
+    // Build the layout
     return vbox({
-      text("Message Board Server") | bold | center,
+      text("Message Board Server - LIVE") | bold | center | color(Color::Cyan),
       separator(),
+      
+      // Stats row
       hbox({
-        vbox(message_elements) | flex,
-        sidebar->Render() | border
+        vbox({
+          text("Connected Clients") | bold,
+          text(std::to_string(activeClients)) | bold | center | color(Color::Green),
+        }) | border | flex,
+        
+        vbox({
+          text("Total Messages") | bold,
+          text(std::to_string(messageCount)) | bold | center | color(Color::Yellow),
+        }) | border | flex,
+        
+        vbox({
+          text("Received") | bold,
+          text(std::to_string(totalReceived)) | bold | center | color(Color::Blue),
+        }) | border | flex,
       }),
+      
       separator(),
+      
+      // Message board
       vbox({
-        text("Server Log") | bold,
-        vbox(log_elements) | border | flex
-      }),
+        text("Message Board") | bold | color(Color::Magenta),
+        vbox(message_elements) | border | flex | yscroll,
+      }) | flex,
+      
       separator(),
-      text("Stats: Users=3, Posts=" + std::to_string(messages.size()) + ", Uptime=42s")
+      
+      // Controls
+      vbox({
+        text("Controls") | bold,
+        sidebar->Render() | border,
+      }),
+      
+      separator(),
+      
+      text("Updating in real-time from server...") | dim | center,
     }) | border;
   });
 
   screen.Loop(renderer);
+  
+  return 0;
 }
