@@ -747,9 +747,32 @@ void server_run_loop()
         t.detach();
     }
 
+    // Server is shutting down - gracefully disconnect all active clients
+    g_serverState.logEvent("SERVER", "Initiating server shutdown - disconnecting all clients...");
+    
+    // Send goodbye message to all connected clients (multiple times to increase delivery chance)
+    {
+        std::lock_guard<std::mutex> lock(g_serverState.clientsMutex);
+        std::vector<int> clientsToDisconnect = g_serverState.activeClientSockets;
+        std::string goodbyeMessage = "SERVER" + fieldDelimiter + "SHUTDOWN" + fieldDelimiter + "Server is shutting down" + transmissionTerminator;
+        
+        // Send goodbye message 3 times with delays to increase chance of delivery
+        for (int attempt = 0; attempt < 3; attempt++) {
+            for (int clientSocket : clientsToDisconnect) {
+                send_all_bytes(clientSocket, goodbyeMessage.c_str(), goodbyeMessage.size(), 0);
+            }
+            if (attempt < 2) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }
+    }
+    
+    // Give clients time to receive and process the goodbye message
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    
     // Cleanup and close the listening socket
     close(ListeningSocket);
-    std::cout << "Server shutdown successfully." << std::endl;
+    g_serverState.logEvent("SERVER", "Server shutdown complete");
 }
 
 #if !defined(UNIT_TEST) && !defined(GUI_BUILD)

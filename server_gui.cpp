@@ -39,6 +39,35 @@ int main() {
   int current_log_page = 0;
   const int POSTS_PER_PAGE = 7;
   const int EVENTS_PER_PAGE = 7;
+  
+  // Track new messages for notification banner
+  size_t last_displayed_message_count = 0;
+  size_t last_displayed_event_count = 0;
+  
+  // Filter state for Message Board
+  std::string filter_title_input_text = "";  // User is typing here
+  std::string filter_author_input_text = ""; // User is typing here
+  std::string filter_title = "";              // Applied filter
+  std::string filter_author = "";             // Applied filter
+  bool filter_apply_pending = false;          // Flag to apply filters on next render
+  
+  // Create input fields for filtering
+  auto filter_title_input = Input(&filter_title_input_text, "");
+  auto filter_author_input = Input(&filter_author_input_text, "");
+  
+  // Apply Filters button
+  auto apply_filters_button = Button("Apply Filters", [&] {
+    filter_apply_pending = true;  // Set flag instead of directly applying
+  });
+  
+  // Clear Filters button
+  auto clear_filters_button = Button("Clear Filters", [&] {
+    filter_title_input_text = "";
+    filter_author_input_text = "";
+    filter_title = "";
+    filter_author = "";
+    current_page = 0;  // Reset to first page
+  });
 
   // Create tab buttons with colors matching their sections
   auto tab_message_board = Button("Message Board", [&] { 
@@ -63,6 +92,25 @@ int main() {
   auto shutdown_button = Button("Shutdown Server", [&] { 
     g_serverState.serverRunning = false;
     screen.Exit(); 
+  });
+  
+  // Jump to Latest button (for Message Board and Event Log)
+  auto jump_to_latest_button = Button("Jump to Latest", [&] {
+    if (selected_tab == 0) {
+      // Message Board
+      current_page = 0;
+      {
+        std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
+        last_displayed_message_count = g_serverState.messageBoard.size();
+      }
+    } else if (selected_tab == 1) {
+      // Event Log
+      current_log_page = 0;
+      {
+        std::lock_guard<std::mutex> lock(g_serverState.eventLogMutex);
+        last_displayed_event_count = g_serverState.eventLog.size();
+      }
+    }
   });
   
   // Pagination buttons for Message Board and Event Log
@@ -140,8 +188,57 @@ int main() {
       totalReceived = g_serverState.totalMessagesReceived;
     }
 
+    // Apply filters if pending
+    if (filter_apply_pending) {
+      filter_title = filter_title_input_text;
+      filter_author = filter_author_input_text;
+      current_page = 0;  // Reset to first page when filtering
+      filter_apply_pending = false;
+    }
+    
+    // Always check for new messages/events (even when viewing other tabs)
+    {
+      std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
+      if (g_serverState.messageBoard.size() > last_displayed_message_count && current_page > 0) {
+        // New messages arrived while viewing older page - will show banner
+      }
+    }
+    
+    {
+      std::lock_guard<std::mutex> lock(g_serverState.eventLogMutex);
+      if (g_serverState.eventLog.size() > last_displayed_event_count && current_log_page > 0) {
+        // New events arrived while viewing older page - will show banner
+      }
+    }
+    
+    // Update last_displayed_message_count when on page 0
+    if (current_page == 0 && selected_tab == 0) {
+      std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
+      last_displayed_message_count = g_serverState.messageBoard.size();
+    }
+    
+    // Update last_displayed_event_count when on page 0 of Event Log
+    if (current_log_page == 0 && selected_tab == 1) {
+      std::lock_guard<std::mutex> lock(g_serverState.eventLogMutex);
+      last_displayed_event_count = g_serverState.eventLog.size();
+    }
+
     // Viewport content based on selected tab
     Element viewport_content;
+    
+    // Check for new messages/events for banner display (outside of tab-specific code)
+    bool has_new_messages = false;
+    bool has_new_events = false;
+    
+    {
+      std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
+      has_new_messages = (g_serverState.messageBoard.size() > last_displayed_message_count);
+    }
+    
+    {
+      std::lock_guard<std::mutex> lock(g_serverState.eventLogMutex);
+      has_new_events = (g_serverState.eventLog.size() > last_displayed_event_count);
+    }
 
     // TAB 0: Message Board
     if (selected_tab == 0) {
@@ -152,8 +249,21 @@ int main() {
         if (g_serverState.messageBoard.empty()) {
           message_elements.push_back(text("(No messages yet)") | dim);
         } else {
-          // Calculate pagination
-          int total_posts = g_serverState.messageBoard.size();
+          // New messages check is done above
+          
+          // Apply filters to create filtered list
+          std::vector<int> filtered_indices;
+          for (int i = (int)g_serverState.messageBoard.size() - 1; i >= 0; i--) {
+            const auto& post = g_serverState.messageBoard[i];
+            bool title_match = filter_title.empty() || post.title.find(filter_title) != std::string::npos;
+            bool author_match = filter_author.empty() || post.author.find(filter_author) != std::string::npos;
+            if (title_match && author_match) {
+              filtered_indices.push_back(i);
+            }
+          }
+          
+          // Calculate pagination on filtered results
+          int total_posts = filtered_indices.size();
           int total_pages = (total_posts + POSTS_PER_PAGE - 1) / POSTS_PER_PAGE;
           
           // Clamp current page to valid range
@@ -164,12 +274,15 @@ int main() {
           int start_idx = current_page * POSTS_PER_PAGE;
           int end_idx = std::min(start_idx + POSTS_PER_PAGE, total_posts);
           
-          // Display posts for current page
+          // Display posts for current page (newest first)
           for (int i = start_idx; i < end_idx; i++) {
-            const auto& post = g_serverState.messageBoard[i];
+            int original_idx = filtered_indices[i];
+            const auto& post = g_serverState.messageBoard[original_idx];
+            int post_number = i + 1;  // Posts are 1-indexed for display
             message_elements.push_back(
               vbox(
                 hbox(
+                  text("#" + std::to_string(post_number) + "  ") | dim,
                   text("Author: " + (post.author.empty() ? "(anonymous)" : post.author)) | bold,
                   text("  |  "),
                   text("Client #" + std::to_string(post.clientId)) | color(Color::Green)
@@ -182,13 +295,45 @@ int main() {
           }
         }
       }
-      viewport_content = vbox(
-        text("Message Board") | bold | color(Color::Magenta) | center,
-        separator(),
-        text("Page " + std::to_string(current_page + 1) + " of " + std::to_string((g_serverState.messageBoard.size() + POSTS_PER_PAGE - 1) / POSTS_PER_PAGE)) | dim | center,
-        separator(),
-        vbox(message_elements)
+      // Build viewport content with optional new messages banner
+      Elements viewport_elements;
+      viewport_elements.push_back(text("Message Board") | bold | color(Color::Magenta) | center);
+      viewport_elements.push_back(separator());
+      
+      // Show banner if new messages are available and we're not on page 0
+      if (has_new_messages && current_page > 0) {
+        viewport_elements.push_back(
+          text("[!] New messages available") | bold | color(Color::Yellow) | center
+        );
+        viewport_elements.push_back(separator());
+      }
+      
+      viewport_elements.push_back(
+        hbox(
+          text("Title: ") | color(Color::Yellow),
+          filter_title_input->Render() | flex,
+          text("  "),
+          text("Author: ") | color(Color::Yellow),
+          filter_author_input->Render() | flex
+        )
       );
+      
+      viewport_elements.push_back(
+        hbox(
+          text("  ") | flex,
+          apply_filters_button->Render() | size(WIDTH, GREATER_THAN, 13),
+          text("  "),
+          clear_filters_button->Render() | size(WIDTH, GREATER_THAN, 13),
+          text("  ") | flex
+        ) | size(HEIGHT, EQUAL, 3)
+      );
+      
+      viewport_elements.push_back(separator());
+      viewport_elements.push_back(text("Page " + std::to_string(current_page + 1) + " of " + std::to_string((g_serverState.messageBoard.size() + POSTS_PER_PAGE - 1) / POSTS_PER_PAGE)) | dim | center);
+      viewport_elements.push_back(separator());
+      viewport_elements.push_back(vbox(message_elements));
+      
+      viewport_content = vbox(viewport_elements);
     }
 
     // TAB 1: Event Log (detailed)
@@ -199,6 +344,8 @@ int main() {
         if (g_serverState.eventLog.empty()) {
           log_elements.push_back(text("(No events yet)") | dim);
         } else {
+          // New events check is done above
+          
           // Calculate pagination
           int total_events = g_serverState.eventLog.size();
           int total_pages = (total_events + EVENTS_PER_PAGE - 1) / EVENTS_PER_PAGE;
@@ -222,9 +369,12 @@ int main() {
               else if (it->event_type == "GET_BOARD") event_color = Color::Cyan;
               else if (it->event_type == "ERROR") event_color = Color::RedLight;
               
-              // Show description line
+              int event_number = event_count + 1;  // Events are 1-indexed for display
+              
+              // Show description line with number
               log_elements.push_back(
                 hbox(
+                  text("#" + std::to_string(event_number) + "  ") | dim,
                   text(it->timestamp) | dim,
                   text(" [" + it->event_type + "] ") | bold | color(event_color),
                   text(it->message)
@@ -248,13 +398,25 @@ int main() {
           }
         }
       }
-      viewport_content = vbox(
-        text("Server Event Log - Full Details") | bold | color(Color::Cyan) | center,
-        separator(),
-        text("Page " + std::to_string(current_log_page + 1) + " of " + std::to_string((g_serverState.eventLog.size() + EVENTS_PER_PAGE - 1) / EVENTS_PER_PAGE)) | dim | center,
-        separator(),
-        vbox(log_elements)
-      );
+      
+      // Build viewport content with optional new events banner
+      Elements log_viewport_elements;
+      log_viewport_elements.push_back(text("Server Event Log - Full Details") | bold | color(Color::Cyan) | center);
+      log_viewport_elements.push_back(separator());
+      
+      // Show banner if new events are available and we're not on page 0
+      if (has_new_events && current_log_page > 0) {
+        log_viewport_elements.push_back(
+          text("[!] New events available") | bold | color(Color::Yellow) | center
+        );
+        log_viewport_elements.push_back(separator());
+      }
+      
+      log_viewport_elements.push_back(text("Page " + std::to_string(current_log_page + 1) + " of " + std::to_string((g_serverState.eventLog.size() + EVENTS_PER_PAGE - 1) / EVENTS_PER_PAGE)) | dim | center);
+      log_viewport_elements.push_back(separator());
+      log_viewport_elements.push_back(vbox(log_elements));
+      
+      viewport_content = vbox(log_viewport_elements);
     }
 
     // TAB 2: Connected Clients
@@ -390,23 +552,37 @@ int main() {
   });
 
   // Button renderer - Previous button on left, Next button on right, others in middle
-  auto button_component = Renderer(Container::Horizontal({prev_page_button, test_posts_button, shutdown_button, next_page_button}), [&] {
+  auto button_component = Renderer(Container::Horizontal({prev_page_button, test_posts_button, jump_to_latest_button, shutdown_button, next_page_button}), [&] {
     return hbox(
-      text("  "),
+      text("  ") | flex,
       prev_page_button->Render() | size(WIDTH, GREATER_THAN, 12) | size(HEIGHT, GREATER_THAN, 3),
-      text(" ") | flex,
+      text("  "),
       test_posts_button->Render() | size(WIDTH, GREATER_THAN, 15) | size(HEIGHT, GREATER_THAN, 3),
-      text("   "),
+      text("  "),
+      jump_to_latest_button->Render() | size(WIDTH, GREATER_THAN, 14) | size(HEIGHT, GREATER_THAN, 3),
+      text("  "),
       shutdown_button->Render() | size(WIDTH, GREATER_THAN, 17) | size(HEIGHT, GREATER_THAN, 3),
-      text(" ") | flex,
+      text("  "),
       next_page_button->Render() | size(WIDTH, GREATER_THAN, 8) | size(HEIGHT, GREATER_THAN, 3),
-      text("  ")
+      text("  ") | flex
     );
+  });
+
+  // Create filter input renderer - hidden by default (shown inside viewport instead)
+  auto filter_inputs_renderer = Renderer(Container::Vertical({
+    filter_title_input,
+    filter_author_input,
+    apply_filters_button,
+    clear_filters_button
+  }), [&] {
+    // Don't render here - these are rendered inside the viewport only
+    return text("");
   });
 
   // Create main component hierarchy
   auto main_component = Container::Vertical({
     tab_bar_component,
+    filter_inputs_renderer,
     content_scroller,
     button_component
   });
