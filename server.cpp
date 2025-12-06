@@ -19,6 +19,7 @@
 #include <iostream>
 #include <ctime>
 #include <vector>
+#include <algorithm>
 #include <unordered_map>
 #include <string_view>
 #include <thread>
@@ -86,11 +87,11 @@ struct ParseResult {
     std::string filter_title;    // for GET_BOARD (optional)
 };
 
-bool post_handler(const ParseResult& parsed, std::string& errorDetails)
+bool post_handler(const ParseResult& parsed, std::string& errorDetails, int clientId)
 {
     // DEBUG: Print what's being posted
-    std::cout << "\n=== POST_HANDLER DEBUG ===" << std::endl;
-    std::cout << "Number of posts to add: " << parsed.posts.size() << std::endl;
+    // std::cout << "\n=== POST_HANDLER DEBUG ===" << std::endl;
+    // std::cout << "Number of posts to add: " << parsed.posts.size() << std::endl;
     
     // Append each post from the parsed result to the message board
     try{
@@ -105,16 +106,17 @@ bool post_handler(const ParseResult& parsed, std::string& errorDetails)
 
         for (size_t i = 0; i < parsed.posts.size(); i++)
         {
-            const Post& p = parsed.posts[i];
-            std::cout << "  Adding Post " << i << ": Author=\"" << p.author 
-                      << "\" Title=\"" << p.title 
-                      << "\" Message=\"" << p.message << "\"" << std::endl;
+            Post p = parsed.posts[i];
+            // std::cout << "  Adding Post " << i << ": Author=\"" << p.author 
+            //           << "\" Title=\"" << p.title 
+            //           << "\" Message=\"" << p.message << "\"" << std::endl;
+            p.clientId = clientId;  // Tag the post with the client ID
             g_serverState.messageBoard.push_back(p);
             g_serverState.totalMessagesReceived++;
         }
         
-        std::cout << "Total posts in messageBoard after adding: " << g_serverState.messageBoard.size() << std::endl;
-        std::cout << "==========================\n" << std::endl;
+        // std::cout << "Total posts in messageBoard after adding: " << g_serverState.messageBoard.size() << std::endl;
+        // std::cout << "==========================\n" << std::endl;
     } 
     catch (const std::exception& ex) 
     {
@@ -136,7 +138,6 @@ bool quit_handlder(int SocketToClose)
 
     // Immediately close the socket - since the client requested to quit
     close(SocketToClose);
-    std::cout << "Server shutdown successfully." << std::endl;
     return true;
 }
 
@@ -209,14 +210,14 @@ std::string get_board_handler(const std::string& authorFilter, const std::string
     std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
     
     // DEBUG: Print what's in messageBoard
-    std::cout << "\n=== GET_BOARD_HANDLER DEBUG ===" << std::endl;
-    std::cout << "Total posts in messageBoard: " << g_serverState.messageBoard.size() << std::endl;
-    for (size_t i = 0; i < g_serverState.messageBoard.size(); i++) {
-        std::cout << "  Post " << i << ": Author=\"" << g_serverState.messageBoard[i].author 
-                  << "\" Title=\"" << g_serverState.messageBoard[i].title 
-                  << "\" Message=\"" << g_serverState.messageBoard[i].message << "\"" << std::endl;
-    }
-    std::cout << "Filters: Author=\"" << authorFilter << "\" Title=\"" << titleFilter << "\"" << std::endl;
+    // std::cout << "\n=== GET_BOARD_HANDLER DEBUG ===" << std::endl;
+    // std::cout << "Total posts in messageBoard: " << g_serverState.messageBoard.size() << std::endl;
+    // for (size_t i = 0; i < g_serverState.messageBoard.size(); i++) {
+    //     std::cout << "  Post " << i << ": Author=\"" << g_serverState.messageBoard[i].author 
+    //               << "\" Title=\"" << g_serverState.messageBoard[i].title 
+    //               << "\" Message=\"" << g_serverState.messageBoard[i].message << "\"" << std::endl;
+    // }
+    // std::cout << "Filters: Author=\"" << authorFilter << "\" Title=\"" << titleFilter << "\"" << std::endl;
     
     // Build a string containing all messages that match optional filters.
     std::string allMessages;
@@ -243,9 +244,9 @@ std::string get_board_handler(const std::string& authorFilter, const std::string
         allMessages += fieldDelimiter + post.author + fieldDelimiter + post.title + fieldDelimiter + post.message;
     }
 
-    std::cout << "Posts included in response: " << postsIncluded << std::endl;
-    std::cout << "Response wire format: " << allMessages << std::endl;
-    std::cout << "================================\n" << std::endl;
+    // std::cout << "Posts included in response: " << postsIncluded << std::endl;
+    // std::cout << "Response wire format: " << allMessages << std::endl;
+    // std::cout << "================================\n" << std::endl;
 
     allMessages += transmissionTerminator; // End with terminator
 
@@ -261,9 +262,9 @@ ParseResult parse_message(const std::string& completeMessage,
     res.ok = false;
 
     // DEBUG: Print raw message received
-    std::cout << "\n=== PARSE_MESSAGE DEBUG ===" << std::endl;
-    std::cout << "Raw message received (" << completeMessage.size() << " bytes):" << std::endl;
-    std::cout << "  [" << completeMessage << "]" << std::endl;
+    // std::cout << "\n=== PARSE_MESSAGE DEBUG ===" << std::endl;
+    // std::cout << "Raw message received (" << completeMessage.size() << " bytes):" << std::endl;
+    // std::cout << "  [" << completeMessage << "]" << std::endl;
     
     if (completeMessage.empty()) {
         res.error = "Empty message received.";
@@ -274,14 +275,14 @@ ParseResult parse_message(const std::string& completeMessage,
     // Note: We include message separators as part of the parsing, not as boundaries
     size_t termPos = completeMessage.find(transmissionTerminator);
 
-    std::cout << "Terminator pos: " << (termPos == std::string::npos ? -1 : (int)termPos) << std::endl;
+    // std::cout << "Terminator pos: " << (termPos == std::string::npos ? -1 : (int)termPos) << std::endl;
 
     // Determine the end position: use terminator if found, otherwise full message length
     size_t endPos = completeMessage.size();
     if (termPos != std::string::npos) endPos = termPos;
 
-    std::cout << "Using endPos: " << endPos << std::endl;
-    std::cout << "Message chunk to parse: [" << completeMessage.substr(0, endPos) << "]" << std::endl;
+    // std::cout << "Using endPos: " << endPos << std::endl;
+    // std::cout << "Message chunk to parse: [" << completeMessage.substr(0, endPos) << "]" << std::endl;
 
     // Tokenize fields up to endPos, treating message separators as regular field delimiters
     // First, temporarily replace message separators with field delimiters for parsing
@@ -374,22 +375,22 @@ ParseResult parse_message(const std::string& completeMessage,
 
         // Loop complete, all posts processed successfully
         res.ok = true;
-        std::cout << "Parsed " << res.posts.size() << " POST messages" << std::endl;
-        std::cout << "===========================\n" << std::endl;
+        // std::cout << "Parsed " << res.posts.size() << " POST messages" << std::endl;
+        // std::cout << "===========================\n" << std::endl;
         return res;
     }
 
     if (res.clientCmd == CLIENT_COMMANDS::QUIT) 
     {
         res.ok = true;
-        std::cout << "Parsed QUIT command" << std::endl;
-        std::cout << "===========================\n" << std::endl;
+        // std::cout << "Parsed QUIT command" << std::endl;
+        // std::cout << "===========================\n" << std::endl;
         return res;
     }
 
     // If we reach here, something went wrong
     res.error = "Unhandled command or parsing error.";
-    std::cout << "===========================\n" << std::endl;
+    // std::cout << "===========================\n" << std::endl;
     return res;
 }
 
@@ -518,13 +519,16 @@ std::string handle_post_error(const std::string& errorMessage)
 
 /// @brief Processes a parsed client message and generates a server response.
 /// @param parsed The ParseResult from parse_message() containing the command and payload.
+/// @param CommunicationSocket The socket for this client connection
+/// @param clientId The unique ID assigned to this client
 /// @return A string response to send back to the client (wire format).
-void handle_client_request(const ParseResult& parsed, int CommunicationSocket)
+void handle_client_request(const ParseResult& parsed, int CommunicationSocket, int clientId)
 {
     // Error checking: if parsing failed, send an error response
     if (!parsed.ok) 
     {
         // Send back an error response
+        g_serverState.logEvent("ERROR", "Invalid command: " + parsed.error);
         std::string emptyAuthor = "";
         std::string emptyTitle = "";
         std::string response = "INVALID_COMMAND" + fieldDelimiter + emptyAuthor + fieldDelimiter + emptyTitle + fieldDelimiter + parsed.error + transmissionTerminator;
@@ -538,6 +542,8 @@ void handle_client_request(const ParseResult& parsed, int CommunicationSocket)
         case CLIENT_COMMANDS::GET_BOARD: 
         {
             // Call get_board_handler with optional filters - generate a message containing the whole board.
+            std::string raw_msg = "GET_BOARD}+{" + parsed.filter_author + "}+{" + parsed.filter_title + "}}&{{";
+            g_serverState.logEvent("GET_BOARD", "Client requested board (socket: " + std::to_string(CommunicationSocket) + ")", raw_msg);
             std::string response = get_board_handler(parsed.filter_author, parsed.filter_title);
             send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
             return;     
@@ -546,16 +552,25 @@ void handle_client_request(const ParseResult& parsed, int CommunicationSocket)
         case CLIENT_COMMANDS::POST: 
         {
             std::string errorMessage;
-            bool result = post_handler(parsed, errorMessage);
+            bool result = post_handler(parsed, errorMessage, clientId);
             if(result == false)
             {
                 // Build and send POST_ERROR response
+                g_serverState.logEvent("POST_ERROR", errorMessage);
                 std::string response = handle_post_error(errorMessage);
                 send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
             }
             else
             {
                 // Build and send POST_OK response
+                // Reconstruct raw message from parsed posts
+                std::string raw_msg = "POST";
+                for (const auto& post : parsed.posts) {
+                    raw_msg += "}+{" + post.author + "}+{" + post.title + "}+{" + post.message;
+                    if (&post != &parsed.posts.back()) raw_msg += "}#{";
+                }
+                raw_msg += "}}&{{";
+                g_serverState.logEvent("POST", "Client posted " + std::to_string(parsed.posts.size()) + " message(s) (socket: " + std::to_string(CommunicationSocket) + ")", raw_msg);
                 std::string response = build_post_ok();
                 send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
             }
@@ -587,13 +602,19 @@ void client_handler(int CommunicationSocket)
     std::string CompletedMessage; // A complete message once terminator is found
     bool keepRunning = true;
 
+    // Assign unique client ID
+    int myClientId;
+    {
+        std::lock_guard<std::mutex> lock(g_serverState.clientsMutex);
+        myClientId = g_serverState.nextClientId++;
+        g_serverState.activeClientSockets.push_back(CommunicationSocket);
+    }
+
     // Increment active connections
     g_serverState.activeConnections++;
-
-    std::cout << "Client handler started for socket " << CommunicationSocket << std::endl;
+    g_serverState.logEvent("CONNECT", "Client #" + std::to_string(myClientId) + " connected (socket: " + std::to_string(CommunicationSocket) + ")");
 
     while (keepRunning) {
-        std::cout << "Waiting to receive data from client...\n" << std::endl;
 
         // Read a complete message
         bool result = read_message_until_terminator(
@@ -605,12 +626,12 @@ void client_handler(int CommunicationSocket)
 
         // Connection closed or error - exit loop
         if (!result) {
-            std::cout << "Connection closed or error reading message." << std::endl;
+            g_serverState.logEvent("DISCONNECT", "Client disconnected (socket: " + std::to_string(CommunicationSocket) + ")");
             keepRunning = false;
             break;
         }
 
-        std::cout << "Received message from client: " << CompletedMessage << std::endl;
+        // std::cout << "Received message from client: " << CompletedMessage << std::endl;
 
         // Parse the complete message (which may contain multiple POST triples separated by }#{)
         ParseResult parsed = parse_message(
@@ -622,7 +643,7 @@ void client_handler(int CommunicationSocket)
 
         // Check if client wants to quit
         if (parsed.ok && parsed.clientCmd == CLIENT_COMMANDS::QUIT) {
-            std::cout << "Client requested disconnect." << std::endl;
+            g_serverState.logEvent("QUIT", "Client requested disconnect (socket: " + std::to_string(CommunicationSocket) + ")");
             
             // Send goodbye message
             std::string emptyAuthor = "SERVER";
@@ -636,7 +657,7 @@ void client_handler(int CommunicationSocket)
         }
 
         // Handle the request and send response
-        handle_client_request(parsed, CommunicationSocket);
+        handle_client_request(parsed, CommunicationSocket, myClientId);
 
         // Clear the completed message for next iteration
         CompletedMessage.clear();
@@ -645,14 +666,24 @@ void client_handler(int CommunicationSocket)
     // Cleanup and close the socket for this client
     close(CommunicationSocket);
     
+    // Remove from active clients list
+    {
+        std::lock_guard<std::mutex> lock(g_serverState.clientsMutex);
+        auto it = std::find(g_serverState.activeClientSockets.begin(), 
+                           g_serverState.activeClientSockets.end(), 
+                           CommunicationSocket);
+        if (it != g_serverState.activeClientSockets.end()) {
+            g_serverState.activeClientSockets.erase(it);
+        }
+    }
+    
     // Decrement active connections
     g_serverState.activeConnections--;
-    
-    std::cout << "Client handler for socket " << CommunicationSocket << " shutting down." << std::endl;
 }
 
-#ifndef UNIT_TEST
-int main()
+/// @brief Server main loop - accepts connections and spawns client handler threads
+/// Uses g_serverState.serverRunning to determine when to shutdown
+void server_run_loop()
 {
     //constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
     constexpr int SERVER_PORT = 26500;
@@ -666,15 +697,15 @@ int main()
     ListeningSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (ListeningSocket == INVALID_SOCKET)
     {
-        std::cout << "Socket creation failed with error: " << strerror(errno) << std::endl;
+        g_serverState.logEvent("ERROR", "Socket creation failed: " + std::string(strerror(errno)));
         close(ListeningSocket);
-        return 0;
+        return;
     }
 
     // Set SO_REUSEADDR to allow immediate reuse of the port after server restart
     int reuse = 1;
     if (setsockopt(ListeningSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        std::cerr << "Warning: Failed to set SO_REUSEADDR: " << strerror(errno) << std::endl;
+        g_serverState.logEvent("WARNING", "Failed to set SO_REUSEADDR: " + std::string(strerror(errno)));
     }
 
     // Configure binding settings and bind the socket
@@ -684,33 +715,31 @@ int main()
     if (bind(ListeningSocket, (struct sockaddr*)&SvrAddr, sizeof(SvrAddr)) == SOCKET_ERROR)
     {
         close(ListeningSocket);
-        std::cout << "ERROR: Failed to bind ServerSocket" << strerror(errno) << std::endl;
-        return 0;
+        g_serverState.logEvent("ERROR", "Failed to bind ServerSocket: " + std::string(strerror(errno)));
+        return;
     }
 
     // Start listening on the configured socket
     if (listen(ListeningSocket, 1) == SOCKET_ERROR)
     {
         close(ListeningSocket);
-        std::cout << "ERROR: Failed to configure listen on ServerSocket" << strerror(errno)<< std::endl;
-        return 0;
+        g_serverState.logEvent("ERROR", "Failed to configure listen on ServerSocket: " + std::string(strerror(errno)));
+        return;
     }
 
-    std::cout << "Server is listening for connections on port " << SERVER_PORT << "..." << std::endl;
+    g_serverState.logEvent("SERVER", "Server is listening for connections on port 26500...");
 
     // Accept multiple connections and spawn a thread for each client
     std::vector<std::thread> clientThreads;
     
-    while (true) {
+    while (g_serverState.serverRunning) {
         // Accept a connection on the socket - spin up a new socket for communication
         CommunicationSocket = accept(ListeningSocket, NULL, NULL);
         if (CommunicationSocket == SOCKET_ERROR)
         {
-            std::cout << "WARNING: Failed to accept connection on ServerSocket: " << strerror(errno) << std::endl;
+            g_serverState.logEvent("WARNING", "Failed to accept connection on ServerSocket: " + std::string(strerror(errno)));
             continue;  // Keep trying to accept more connections
         }
-        
-        std::cout << "Client connected successfully! (Socket: " << CommunicationSocket << ")\n" << std::endl;
         
         // Spawn a new thread to handle this client
         // Use detach() since we don't need to wait for client threads to finish
@@ -721,6 +750,12 @@ int main()
     // Cleanup and close the listening socket
     close(ListeningSocket);
     std::cout << "Server shutdown successfully." << std::endl;
+}
+
+#if !defined(UNIT_TEST) && !defined(GUI_BUILD)
+int main()
+{
+    server_run_loop();
     return 0;
 }
 #endif

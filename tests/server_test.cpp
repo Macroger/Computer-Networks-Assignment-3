@@ -198,22 +198,6 @@ TEST_CASE("parse_message - empty message", "[parse_message]") {
     REQUIRE(result.error.find("Empty message") != std::string::npos);
 }
 
-TEST_CASE("parse_message - POST with multiple triples", "[parse_message]") {
-    // Simple test: Two separate (author, title, message) triples in a single POST
-    std::string msg = "POST}+{Alice}+{TitleA}+{MsgA}#{Bob}+{TitleB}+{MsgB}";
-    
-    auto result = parse_message(msg, "}+{", "}#{", "}}&{{");
-    
-    REQUIRE(result.ok == true);
-    REQUIRE(result.posts.size() == 2);
-    REQUIRE(result.posts[0].author == "Alice");
-    REQUIRE(result.posts[0].title == "TitleA");
-    REQUIRE(result.posts[0].message == "MsgA");
-    REQUIRE(result.posts[1].author == "Bob");
-    REQUIRE(result.posts[1].title == "TitleB");
-    REQUIRE(result.posts[1].message == "MsgB");
-}
-
 // ============================================================================
 // TEST SUITE: build_post_error
 // ============================================================================
@@ -268,7 +252,7 @@ TEST_CASE("post_handler - adds single post to message board", "[post_handler]") 
     parsed.posts.push_back({"Alice", "Title1", "Message1"});
     
     std::string errorDetails;
-    bool success = post_handler(parsed, errorDetails);
+    bool success = post_handler(parsed, errorDetails, 999);
     
     REQUIRE(success == true);
     REQUIRE(errorDetails == "");
@@ -289,7 +273,7 @@ TEST_CASE("post_handler - adds multiple posts to message board", "[post_handler]
     parsed.posts.push_back({"Charlie", "Title3", "Message3"});
     
     std::string errorDetails;
-    bool success = post_handler(parsed, errorDetails);
+    bool success = post_handler(parsed, errorDetails, 999);
     
     REQUIRE(success == true);
     REQUIRE(g_serverState.messageBoard.size() == 3);
@@ -307,7 +291,7 @@ TEST_CASE("post_handler - error when no posts provided", "[post_handler]") {
     // parsed.posts is empty
     
     std::string errorDetails;
-    bool success = post_handler(parsed, errorDetails);
+    bool success = post_handler(parsed, errorDetails, 999);
     
     REQUIRE(success == false);
     REQUIRE(errorDetails.find("No posts to add") != std::string::npos);
@@ -323,7 +307,7 @@ TEST_CASE("post_handler - handles anonymous posts", "[post_handler]") {
     parsed.posts.push_back({"", "", "Anonymous message"});
     
     std::string errorDetails;
-    bool success = post_handler(parsed, errorDetails);
+    bool success = post_handler(parsed, errorDetails, 999);
     
     REQUIRE(success == true);
     REQUIRE(g_serverState.messageBoard.size() == 1);

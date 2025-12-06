@@ -87,9 +87,9 @@ build_server() {
     fi
 }
 
-# Build GUI standalone (experimental)
+# Build GUI (integrated with server)
 build_gui() {
-    print_status "Building GUI (experimental)..."
+    print_status "Building integrated GUI with server..."
     cd "${PROJECT_DIR}"
     
     # Use pkg-config to get proper compilation flags for FTXUI
@@ -104,12 +104,14 @@ build_gui() {
         FTXUI_FLAGS="-I${FTXUI_INCLUDE} -L${FTXUI_LIB} -lftxui-component -lftxui-dom -lftxui-screen"
     fi
     
-    # Compile with FTXUI flags and shared state support
-    # Only include server.cpp for shared_state.h definition (no main function)
-    g++ -std=c++17 -Wall -Wextra -DGUI_BUILD server_gui.cpp server.cpp $FTXUI_FLAGS -o "${BUILD_DIR}/server_gui" 2>&1 | grep -v "undefined reference to .main."
+    # Compile server_gui.cpp (main entry point) with server.cpp (server_run_loop and shared state)
+    # This creates a single integrated executable where GUI spawns the server thread
+    g++ -std=c++17 -Wall -Wextra -DGUI_BUILD server_gui.cpp server.cpp $FTXUI_FLAGS -o "${BUILD_DIR}/server_gui"
     
     if [ $? -eq 0 ]; then
-        print_success "GUI built successfully: ${BUILD_DIR}/server_gui"
+        print_success "Integrated GUI built successfully: ${BUILD_DIR}/server_gui"
+        print_success "  This executable includes both the server and GUI in a single binary"
+        print_success "  Server runs in background thread, GUI runs in main thread"
     else
         print_error "Failed to build GUI"
         exit 1
