@@ -3,7 +3,8 @@ HOW MULTI-CLIENT CONCURRENCY WORKS (UNDER THE HOOD)
 ================================================================================
 
 This document explains the threading architecture implemented in the TCP 
-message board server, including how multiple clients are handled simultaneously.
+message board server, including how multiple clients are handled simultaneously
+and how the GUI integrates with the server.
 
 ================================================================================
 THE BIG PICTURE
@@ -18,6 +19,7 @@ AFTER: Concurrent
 - Server accepts multiple clients simultaneously
 - Each client runs in their own independent thread
 - All clients can send/receive messages in parallel
+- GUI runs in main thread and reads shared state in real-time
 
 ================================================================================
 1. THE MAIN THREAD (ACCEPT LOOP)
