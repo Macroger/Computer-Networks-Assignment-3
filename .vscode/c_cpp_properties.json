@@ -5,11 +5,13 @@
       "name": "Linux",
       "includePath": [
         "/home/macrog/code/School/Computer Networks Assignment 3/external",
-        "/home/macrog/code/School/Computer Networks Assignment 3"
+        "/home/macrog/code/School/Computer Networks Assignment 3",
+        "/home/macrog/vcpkg/installed/x64-linux/include"
       ],
       "compilerPath": "/usr/bin/g++",
       "cStandard": "c17",
-      "cppStandard": "c++17"
+      "cppStandard": "c++17",
+      "intelliSenseMode": "linux-gcc-x64"
     }
   ]
 }

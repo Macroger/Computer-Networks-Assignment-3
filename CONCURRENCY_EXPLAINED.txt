@@ -1,0 +1,331 @@
+================================================================================
+HOW MULTI-CLIENT CONCURRENCY WORKS (UNDER THE HOOD)
+================================================================================
+
+This document explains the threading architecture implemented in the TCP 
+message board server, including how multiple clients are handled simultaneously.
+
+================================================================================
+THE BIG PICTURE
+================================================================================
+
+BEFORE: Sequential
+- Server accepts one client
+- Handles all their requests until they disconnect
+- Then accepts the next client
+
+AFTER: Concurrent
+- Server accepts multiple clients simultaneously
+- Each client runs in their own independent thread
+- All clients can send/receive messages in parallel
+
+================================================================================
+1. THE MAIN THREAD (ACCEPT LOOP)
+================================================================================
+
+Code:
+    while (true) {
+        CommunicationSocket = accept(ListeningSocket, NULL, NULL);
+        
+        std::thread t(client_handler, CommunicationSocket);
+        t.detach();
+    }
+
+What's happening:
+- The main thread runs an INFINITE LOOP that does ONE job: accept new 
+  connections
+- accept() BLOCKS (waits) until a client connects
+- When a client connects, it returns a new socket file descriptor 
+  (e.g., socket #4)
+- Immediately spawns a NEW THREAD that will handle that specific client
+- detach() tells the thread to run independently - we don't wait for it 
+  to finish
+- Main thread IMMEDIATELY goes back to accepting the next client
+
+Key insight: The main thread is like a restaurant host - it just greets 
+customers and assigns them to tables (threads). It doesn't take orders or 
+serve food.
+
+================================================================================
+2. CLIENT HANDLER THREADS
+================================================================================
+
+Code:
+    void client_handler(int CommunicationSocket)
+    {
+        std::string RxBuffer;
+        std::string CompletedMessage;
+        bool keepRunning = true;
+
+        while (keepRunning) {
+            // Read message
+            // Parse message
+            // Handle request
+            // Send response
+        }
+        
+        close(CommunicationSocket);
+    }
+
+What's happening:
+- Each client gets their OWN COPY of this function running in a separate thread
+- Each thread has its OWN LOCAL VARIABLES (RxBuffer, CompletedMessage, etc.)
+- The thread loops: reading → parsing → handling → responding until the 
+  client quits
+- When done, it closes its socket and the thread TERMINATES
+
+Key insight: Each thread is like a waiter assigned to one table. They work 
+independently and don't interfere with each other.
+
+================================================================================
+3. THE SHARED RESOURCE PROBLEM
+================================================================================
+
+Here's where things get tricky. All threads share ONE message board:
+
+    static std::vector<Post> messageBoard;  // SHARED by all threads!
+
+THE PROBLEM: Race Conditions
+Imagine two threads trying to add posts at the EXACT same moment:
+
+    Thread A: Read messageBoard size (100)
+    Thread B: Read messageBoard size (100)  <-- Same size!
+    Thread A: Add post, board now has 101 items
+    Thread B: Add post, thinking board has 100... CRASH or corruption!
+
+This is called a RACE CONDITION - threads "race" to access shared data, 
+and the result depends on timing.
+
+================================================================================
+4. THE MUTEX SOLUTION
+================================================================================
+
+Code:
+    static std::mutex messageBoardMutex;  // A "lock" for the message board
+
+A MUTEX (mutual exclusion) is like a bathroom key - only one person can 
+hold it at a time.
+
+In post_handler():
+    std::lock_guard<std::mutex> lock(messageBoardMutex);
+    // ^ This LOCKS the mutex when created
+
+    messageBoard.push_back(p);  // Safe! Only one thread can be here
+
+    // ^ lock automatically UNLOCKS when it goes out of scope
+
+What happens:
+1. Thread A enters post_handler, tries to lock the mutex → SUCCEEDS, 
+   gets the lock
+2. Thread B enters post_handler, tries to lock the mutex → BLOCKS (waits)
+3. Thread A modifies messageBoard, then exits function → RELEASES LOCK
+4. Thread B WAKES UP, acquires the lock, can now safely modify messageBoard
+
+Key insight: The mutex ensures threads take turns accessing the shared data, 
+like taking turns in the bathroom.
+
+================================================================================
+5. WHY LOCK_GUARD?
+================================================================================
+
+Code:
+    std::lock_guard<std::mutex> lock(messageBoardMutex);
+
+This is RAII (Resource Acquisition Is Initialization):
+- CONSTRUCTOR automatically locks the mutex
+- DESTRUCTOR automatically unlocks when the variable goes out of scope
+- Even if an exception is thrown, the destructor runs and unlocks
+- You can't forget to unlock!
+
+Without lock_guard, you'd have to manually:
+    messageBoardMutex.lock();
+    // do stuff
+    messageBoardMutex.unlock();  // Easy to forget if there's an early return!
+
+================================================================================
+6. THREAD LIFECYCLE VISUALIZATION
+================================================================================
+
+TIME →
+
+Main Thread:    [Accept] → [Spawn T1] → [Accept] → [Spawn T2] → [Accept] → ...
+                             ↓                        ↓
+Thread 1:                   [Read] [Parse] [POST] [Read] [QUIT] [Exit]
+Thread 2:                                  [Read] [Parse] [GET_BOARD] [Read] ...
+
+- Threads run IN PARALLEL on different CPU cores
+- They're completely independent except when accessing shared data
+- Each has its own stack, local variables, and execution state
+
+================================================================================
+7. CRITICAL SECTIONS
+================================================================================
+
+Any code that accesses messageBoard is a CRITICAL SECTION:
+
+✅ SAFE - Protected by mutex:
+    std::lock_guard<std::mutex> lock(messageBoardMutex);
+    for (const Post& post : messageBoard) { ... }
+
+❌ UNSAFE - Not protected!
+    if (messageBoard.empty()) { ... }  // Race condition!
+
+BOTH reading AND writing need protection because:
+- Thread A might be reading while Thread B is writing → sees half-written data
+- Thread A might be iterating while Thread B resizes the vector → iterator 
+  invalidated
+
+================================================================================
+8. DETACHED VS JOINED THREADS
+================================================================================
+
+Code:
+    std::thread t(client_handler, CommunicationSocket);
+    t.detach();  // Thread runs independently
+
+DETACHED: 
+- Thread runs on its own, no way to wait for it
+- When thread finishes, OS automatically cleans up resources
+- Main thread doesn't know or care when it finishes
+
+JOINED (alternative):
+    std::thread t(client_handler, CommunicationSocket);
+    clientThreads.push_back(std::move(t));
+    // Later: t.join();  // Wait for this thread to finish
+
+- You can wait for the thread to complete
+- Useful for graceful shutdown, but not needed for your server
+
+WHY DETACH? Your server runs forever, and you don't need to wait for clients 
+to disconnect before accepting new ones.
+
+================================================================================
+9. SOCKET FILE DESCRIPTORS
+================================================================================
+
+Each socket is just an integer (file descriptor):
+- Client 1 connects → socket = 4
+- Client 2 connects → socket = 5
+- Client 3 connects → socket = 6
+
+Each thread gets its OWN socket number passed by value:
+    std::thread t(client_handler, CommunicationSocket);
+                                  ↑ Copy of the integer
+
+So Thread 1 reads/writes to socket 4, Thread 2 to socket 5, etc. 
+NO INTERFERENCE!
+
+================================================================================
+10. MEMORY LAYOUT
+================================================================================
+
+PROCESS MEMORY:
+
+├── Code Segment (shared by all threads)
+│   └── client_handler() function
+│
+├── Data Segment (shared)
+│   ├── messageBoard ← SHARED, needs mutex!
+│   └── messageBoardMutex
+│
+├── Heap (shared, but we don't use it much)
+│
+└── Stacks (separate per thread!)
+    ├── Thread 1 Stack
+    │   ├── RxBuffer (Thread 1's own)
+    │   ├── CompletedMessage (Thread 1's own)
+    │   └── CommunicationSocket = 4
+    │
+    ├── Thread 2 Stack
+    │   ├── RxBuffer (Thread 2's own)
+    │   ├── CompletedMessage (Thread 2's own)
+    │   └── CommunicationSocket = 5
+    │
+    └── Main Thread Stack
+
+Key insight: Each thread has its own stack for local variables, but they 
+all see the same global variables.
+
+================================================================================
+COMMON PITFALLS (THAT YOU AVOIDED!)
+================================================================================
+
+❌ Not locking shared data → Race conditions, corruption
+✅ You used mutexes
+
+❌ Deadlock → Two threads each waiting for the other's lock
+✅ You only have one mutex, so no circular waiting
+
+❌ Locking too much → Threads wait forever, no parallelism
+✅ You only lock during board access, not during socket I/O
+
+❌ Forgetting to unlock → Thread holds lock forever
+✅ You used lock_guard which auto-unlocks
+
+================================================================================
+PERFORMANCE CHARACTERISTICS
+================================================================================
+
+BEFORE (sequential):
+- 10 clients, each takes 5 seconds → Total: 50 seconds
+
+AFTER (concurrent):
+- 10 clients, each takes 5 seconds → Total: ~5 seconds (all in parallel!)
+- Limited only by CPU cores and I/O
+
+BOTTLENECK:
+- The mutex creates a brief bottleneck when multiple threads POST 
+  simultaneously
+- But it's tiny (microseconds) compared to network I/O (milliseconds)
+
+================================================================================
+SUMMARY
+================================================================================
+
+1. MAIN THREAD loops forever accepting connections
+
+2. Each connection gets its OWN THREAD running client_handler()
+
+3. Threads are INDEPENDENT with their own local variables
+
+4. They SHARE the messageBoard global variable
+
+5. MUTEX prevents race conditions when accessing shared data
+
+6. LOCK_GUARD ensures automatic locking/unlocking
+
+7. Threads DETACH to run independently without blocking the main thread
+
+Your server can now handle hundreds of simultaneous clients efficiently! 🎉
+
+================================================================================
+KEY CODE LOCATIONS
+================================================================================
+
+Threading includes:
+    #include <thread>
+    #include <mutex>
+
+Shared data protection:
+    static std::vector<Post> messageBoard;
+    static std::mutex messageBoardMutex;
+
+Protected functions:
+    - post_handler() - locks mutex before modifying messageBoard
+    - get_board_handler() - locks mutex before reading messageBoard
+
+Client handler:
+    void client_handler(int CommunicationSocket)
+    - Lives in server.cpp before main()
+    - Each client runs this in their own thread
+
+Main accept loop:
+    while (true) {
+        CommunicationSocket = accept(...);
+        std::thread t(client_handler, CommunicationSocket);
+        t.detach();
+    }
+
+================================================================================
+END OF DOCUMENT
+================================================================================

@@ -21,6 +21,8 @@
 #include <vector>
 #include <unordered_map>
 #include <string_view>
+#include <thread>
+#include <mutex>
 
 using namespace std;
 
@@ -79,6 +81,9 @@ struct Post {
 /// @brief In-memory storage for posts.
 static std::vector<Post> messageBoard;
 
+/// @brief Mutex to protect access to messageBoard from multiple threads
+static std::mutex messageBoardMutex;
+
 /// @brief Represents the result of parsing a client message.
 /// Contains either the parsed command and associated data, or an error message.
 struct ParseResult {
@@ -92,6 +97,10 @@ struct ParseResult {
 
 bool post_handler(const ParseResult& parsed, std::string& errorDetails)
 {
+    // DEBUG: Print what's being posted
+    std::cout << "\n=== POST_HANDLER DEBUG ===" << std::endl;
+    std::cout << "Number of posts to add: " << parsed.posts.size() << std::endl;
+    
     // Append each post from the parsed result to the message board
     try{
         // Check if there are posts to add
@@ -100,10 +109,20 @@ bool post_handler(const ParseResult& parsed, std::string& errorDetails)
             return false; // No posts to add
         }
 
-        for (const Post& p : parsed.posts)
+        // Lock the mutex to ensure thread-safe access to messageBoard
+        std::lock_guard<std::mutex> lock(messageBoardMutex);
+
+        for (size_t i = 0; i < parsed.posts.size(); i++)
         {
+            const Post& p = parsed.posts[i];
+            std::cout << "  Adding Post " << i << ": Author=\"" << p.author 
+                      << "\" Title=\"" << p.title 
+                      << "\" Message=\"" << p.message << "\"" << std::endl;
             messageBoard.push_back(p);
-        }   
+        }
+        
+        std::cout << "Total posts in messageBoard after adding: " << messageBoard.size() << std::endl;
+        std::cout << "==========================\n" << std::endl;
     } 
     catch (const std::exception& ex) 
     {
@@ -194,6 +213,19 @@ static std::vector<std::string> split_fields_until(const std::string& text,const
 /// @return A string containing the formatted message board data.
 std::string get_board_handler(const std::string& authorFilter, const std::string& titleFilter)
 {
+    // Lock the mutex to ensure thread-safe access to messageBoard
+    std::lock_guard<std::mutex> lock(messageBoardMutex);
+    
+    // DEBUG: Print what's in messageBoard
+    std::cout << "\n=== GET_BOARD_HANDLER DEBUG ===" << std::endl;
+    std::cout << "Total posts in messageBoard: " << messageBoard.size() << std::endl;
+    for (size_t i = 0; i < messageBoard.size(); i++) {
+        std::cout << "  Post " << i << ": Author=\"" << messageBoard[i].author 
+                  << "\" Title=\"" << messageBoard[i].title 
+                  << "\" Message=\"" << messageBoard[i].message << "\"" << std::endl;
+    }
+    std::cout << "Filters: Author=\"" << authorFilter << "\" Title=\"" << titleFilter << "\"" << std::endl;
+    
     // Build a string containing all messages that match optional filters.
     std::string allMessages;
     std::string command = std::string(kCmdToStr.at(SERVER_RESPONSES::GET_BOARD));
@@ -202,6 +234,7 @@ std::string get_board_handler(const std::string& authorFilter, const std::string
 
     // For each message in the message board, append it to allMessages in the correct wire format.
     bool firstPost = true;
+    int postsIncluded = 0;
     for (const Post& post : messageBoard)
     {
         // Check if the post matches the filters - if not, skip it.
@@ -213,9 +246,14 @@ std::string get_board_handler(const std::string& authorFilter, const std::string
             allMessages += messageSeperator;
         }
         firstPost = false;
+        postsIncluded++;
         
         allMessages += fieldDelimiter + post.author + fieldDelimiter + post.title + fieldDelimiter + post.message;
     }
+
+    std::cout << "Posts included in response: " << postsIncluded << std::endl;
+    std::cout << "Response wire format: " << allMessages << std::endl;
+    std::cout << "================================\n" << std::endl;
 
     allMessages += transmissionTerminator; // End with terminator
 
@@ -230,22 +268,39 @@ ParseResult parse_message(const std::string& completeMessage,
     ParseResult res{};
     res.ok = false;
 
+    // DEBUG: Print raw message received
+    std::cout << "\n=== PARSE_MESSAGE DEBUG ===" << std::endl;
+    std::cout << "Raw message received (" << completeMessage.size() << " bytes):" << std::endl;
+    std::cout << "  [" << completeMessage << "]" << std::endl;
+    
     if (completeMessage.empty()) {
         res.error = "Empty message received.";
         return res;
     }
 
-    // Find where this logical message ends: first separator or terminator.
-    size_t sepPos  = completeMessage.find(messageSeperator);
+    // Find where this logical message ends: the terminator marks the end
+    // Note: We include message separators as part of the parsing, not as boundaries
     size_t termPos = completeMessage.find(transmissionTerminator);
 
-    // Determine the earliest of separator or terminator, or the full message length if neither found
-    size_t endPos = completeMessage.size();
-    if (sepPos != std::string::npos)  endPos = std::min(endPos, sepPos);
-    if (termPos != std::string::npos) endPos = std::min(endPos, termPos);
+    std::cout << "Terminator pos: " << (termPos == std::string::npos ? -1 : (int)termPos) << std::endl;
 
-    // Tokenize fields up to endPos
-    auto fields = split_fields_until(completeMessage, fieldDelimiter, endPos);
+    // Determine the end position: use terminator if found, otherwise full message length
+    size_t endPos = completeMessage.size();
+    if (termPos != std::string::npos) endPos = termPos;
+
+    std::cout << "Using endPos: " << endPos << std::endl;
+    std::cout << "Message chunk to parse: [" << completeMessage.substr(0, endPos) << "]" << std::endl;
+
+    // Tokenize fields up to endPos, treating message separators as regular field delimiters
+    // First, temporarily replace message separators with field delimiters for parsing
+    std::string messageToTokenize = completeMessage.substr(0, endPos);
+    size_t replacePos = 0;
+    while ((replacePos = messageToTokenize.find(messageSeperator, replacePos)) != std::string::npos) {
+        messageToTokenize.replace(replacePos, messageSeperator.length(), fieldDelimiter);
+        replacePos += fieldDelimiter.length();
+    }
+    
+    auto fields = split_fields_until(messageToTokenize, fieldDelimiter, messageToTokenize.size());
     if (fields.empty()) {
         res.error = "Malformed message: no fields found.";
         return res;
@@ -327,17 +382,22 @@ ParseResult parse_message(const std::string& completeMessage,
 
         // Loop complete, all posts processed successfully
         res.ok = true;
+        std::cout << "Parsed " << res.posts.size() << " POST messages" << std::endl;
+        std::cout << "===========================\n" << std::endl;
         return res;
     }
 
     if (res.clientCmd == CLIENT_COMMANDS::QUIT) 
     {
         res.ok = true;
+        std::cout << "Parsed QUIT command" << std::endl;
+        std::cout << "===========================\n" << std::endl;
         return res;
     }
 
     // If we reach here, something went wrong
     res.error = "Unhandled command or parsing error.";
+    std::cout << "===========================\n" << std::endl;
     return res;
 }
 
@@ -441,6 +501,29 @@ bool read_message_until_terminator(
     }
 }
 
+/// @brief Builds a formatted POST_ERROR response.
+/// @param errorMessage The error description to include.
+/// @return A wire-format error response ready to send to client.
+std::string handle_post_error(const std::string& errorMessage) 
+{
+    // Wire format: "POST_ERROR}+{error_message}}&{{"
+    string errorPost = std::string(kCmdToStr.at(SERVER_RESPONSES::POST_ERROR));
+
+    string emptyAuthor = ""; // No author for error
+    string emptyTitle = "";  // No title for error
+
+    // Build and return the complete response string
+    string returnResult = 
+        errorPost + fieldDelimiter +
+        emptyAuthor + fieldDelimiter +
+        emptyTitle + fieldDelimiter +
+        errorMessage + transmissionTerminator;
+    return returnResult;
+}
+    
+
+
+
 /// @brief Processes a parsed client message and generates a server response.
 /// @param parsed The ParseResult from parse_message() containing the command and payload.
 /// @return A string response to send back to the client (wire format).
@@ -487,17 +570,9 @@ void handle_client_request(const ParseResult& parsed, int CommunicationSocket)
             return;
         }
 
-        case CLIENT_COMMANDS::QUIT: 
-        {
-            std::string emptyAuthor = "";
-            std::string emptyTitle = "";
-            std::string message = "BYE!";
-
-            std::string response = "QUIT" + fieldDelimiter + emptyAuthor + fieldDelimiter + emptyTitle + fieldDelimiter + message + transmissionTerminator;
-            send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
-            close(CommunicationSocket);  // ← Server sends FIN after response
+        case CLIENT_COMMANDS::QUIT:
+            // Handled in main loop before calling this function
             return;
-        }
 
         case CLIENT_COMMANDS::INVALID_COMMAND:
         default: {
@@ -512,84 +587,15 @@ void handle_client_request(const ParseResult& parsed, int CommunicationSocket)
     }
 }
 
-/// @brief Builds a formatted POST_ERROR response.
-/// @param errorMessage The error description to include.
-/// @return A wire-format error response ready to send to client.
-std::string handle_post_error(const std::string& errorMessage) 
+/// @brief Handles communication with a single client in its own thread
+/// @param CommunicationSocket The socket for this client connection
+void client_handler(int CommunicationSocket)
 {
-    // Wire format: "POST_ERROR}+{error_message}}&{{"
-    string errorPost = std::string(kCmdToStr.at(SERVER_RESPONSES::POST_ERROR));
-
-    string emptyAuthor = ""; // No author for error
-    string emptyTitle = "";  // No title for error
-
-    // Build and return the complete response string
-    string returnResult = 
-        errorPost + fieldDelimiter +
-        emptyAuthor + fieldDelimiter +
-        emptyTitle + fieldDelimiter +
-        errorMessage + transmissionTerminator;
-    return returnResult;
-}
-    
-
-#ifndef UNIT_TEST
-int main()
-{
-    constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
-    constexpr int SERVER_PORT = 26500;
-
-    int ListeningSocket;          // The socket used to listen for incoming connections
-    int CommunicationSocket;      // The socket used for communication with the client
-
-    std::string RxBuffer;   // A buffer to hold received data - accumulates data until full message is received
+    std::string RxBuffer;        // A buffer to hold received data
     std::string CompletedMessage; // A complete message once terminator is found
-    std::string transmissionString; // A complete transmission string - the string to be sent back to the client
-
-    struct sockaddr_in SvrAddr;  // Server address structure
-
-    // Setup the server socket for TCP
-    ListeningSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (ListeningSocket == INVALID_SOCKET)
-    {
-        std::cout << "Socket creation failed with error: " << strerror(errno) << std::endl;
-        close(ListeningSocket);
-        return 0;
-    }
-
-    // Configure binding settings and bind the socket
-    SvrAddr.sin_family = AF_INET;               // Use the Internet address family
-    SvrAddr.sin_addr.s_addr = INADDR_ANY;       // Accept connections from any address
-    SvrAddr.sin_port = htons(SERVER_PORT);      // Set port to 26500
-    if (bind(ListeningSocket, (struct sockaddr*)&SvrAddr, sizeof(SvrAddr)) == SOCKET_ERROR)
-    {
-        close(ListeningSocket);
-        std::cout << "ERROR: Failed to bind ServerSocket" << strerror(errno) << std::endl;
-        return 0;
-    }
-
-    // Start listening on the configured socket
-    if (listen(ListeningSocket, 1) == SOCKET_ERROR)
-    {
-        close(ListeningSocket);
-        std::cout << "ERROR: Failed to configure listen on ServerSocket" << strerror(errno)<< std::endl;
-        return 0;
-    }
-
-    std::cout << "Server is listening for a connection on port " << SERVER_PORT << "..." << std::endl;
-
-    // Accept a connection on the socket - spin up a new socket for communication
-    CommunicationSocket = SOCKET_ERROR;
-    if ((CommunicationSocket = accept(ListeningSocket, NULL, NULL)) == SOCKET_ERROR)
-    {
-        close(ListeningSocket);
-        std::cout << "ERROR: Failed to accept connection on ServerSocket" << strerror(errno) << std::endl;
-        return 0;
-    }
-    
-    std::cout << "Client connected successfully!\n" << std::endl;    
-
     bool keepRunning = true;
+
+    std::cout << "Client handler started for socket " << CommunicationSocket << std::endl;
 
     while (keepRunning) {
         std::cout << "Waiting to receive data from client...\n" << std::endl;
@@ -611,27 +617,111 @@ int main()
 
         std::cout << "Received message from client: " << CompletedMessage << std::endl;
 
-        // Parse the message
+        // Parse the complete message (which may contain multiple POST triples separated by }#{)
         ParseResult parsed = parse_message(
             CompletedMessage, 
             fieldDelimiter, 
             messageSeperator, 
             transmissionTerminator
-        );    
+        );
+
+        // Check if client wants to quit
+        if (parsed.ok && parsed.clientCmd == CLIENT_COMMANDS::QUIT) {
+            std::cout << "Client requested disconnect." << std::endl;
+            
+            // Send goodbye message
+            std::string emptyAuthor = "SERVER";
+            std::string emptyTitle = "BYE!!!";
+            std::string message = "Server says: BYE!!!";
+            std::string response = "QUIT" + fieldDelimiter + emptyAuthor + fieldDelimiter + emptyTitle + fieldDelimiter + message + transmissionTerminator;
+            send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);
+            
+            keepRunning = false;
+            break;
+        }
 
         // Handle the request and send response
         handle_client_request(parsed, CommunicationSocket);
-
-        //std::cout << "Received message from client: " << CompletedMessage << std::endl;   
 
         // Clear the completed message for next iteration
         CompletedMessage.clear();
     }
 
-    // // Cleanup and close the sockets
-    // close(CommunicationSocket);
-    // close(ListeningSocket);
-    // std::cout << "Server shutdown successfully." << std::endl;
+    // Cleanup and close the socket for this client
+    close(CommunicationSocket);
+    std::cout << "Client handler for socket " << CommunicationSocket << " shutting down." << std::endl;
+}
+
+#ifndef UNIT_TEST
+int main()
+{
+    //constexpr const char* SERVER_ADDR = "0.0.0.0"; // Listen on all interfaces
+    constexpr int SERVER_PORT = 26500;
+
+    int ListeningSocket;          // The socket used to listen for incoming connections
+    int CommunicationSocket;      // The socket used for communication with the client
+
+    struct sockaddr_in SvrAddr;  // Server address structure
+
+    // Setup the server socket for TCP
+    ListeningSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (ListeningSocket == INVALID_SOCKET)
+    {
+        std::cout << "Socket creation failed with error: " << strerror(errno) << std::endl;
+        close(ListeningSocket);
+        return 0;
+    }
+
+    // Set SO_REUSEADDR to allow immediate reuse of the port after server restart
+    int reuse = 1;
+    if (setsockopt(ListeningSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+        std::cerr << "Warning: Failed to set SO_REUSEADDR: " << strerror(errno) << std::endl;
+    }
+
+    // Configure binding settings and bind the socket
+    SvrAddr.sin_family = AF_INET;               // Use the Internet address family
+    SvrAddr.sin_addr.s_addr = INADDR_ANY;       // Accept connections from any address
+    SvrAddr.sin_port = htons(SERVER_PORT);      // Set port to 26500
+    if (bind(ListeningSocket, (struct sockaddr*)&SvrAddr, sizeof(SvrAddr)) == SOCKET_ERROR)
+    {
+        close(ListeningSocket);
+        std::cout << "ERROR: Failed to bind ServerSocket" << strerror(errno) << std::endl;
+        return 0;
+    }
+
+    // Start listening on the configured socket
+    if (listen(ListeningSocket, 1) == SOCKET_ERROR)
+    {
+        close(ListeningSocket);
+        std::cout << "ERROR: Failed to configure listen on ServerSocket" << strerror(errno)<< std::endl;
+        return 0;
+    }
+
+    std::cout << "Server is listening for connections on port " << SERVER_PORT << "..." << std::endl;
+
+    // Accept multiple connections and spawn a thread for each client
+    std::vector<std::thread> clientThreads;
+    
+    while (true) {
+        // Accept a connection on the socket - spin up a new socket for communication
+        CommunicationSocket = accept(ListeningSocket, NULL, NULL);
+        if (CommunicationSocket == SOCKET_ERROR)
+        {
+            std::cout << "WARNING: Failed to accept connection on ServerSocket: " << strerror(errno) << std::endl;
+            continue;  // Keep trying to accept more connections
+        }
+        
+        std::cout << "Client connected successfully! (Socket: " << CommunicationSocket << ")\n" << std::endl;
+        
+        // Spawn a new thread to handle this client
+        // Use detach() since we don't need to wait for client threads to finish
+        std::thread t(client_handler, CommunicationSocket);
+        t.detach();
+    }
+
+    // Cleanup and close the listening socket
+    close(ListeningSocket);
+    std::cout << "Server shutdown successfully." << std::endl;
     return 0;
 }
 #endif

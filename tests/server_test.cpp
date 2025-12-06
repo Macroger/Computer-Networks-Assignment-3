@@ -197,15 +197,20 @@ TEST_CASE("parse_message - empty message", "[parse_message]") {
     REQUIRE(result.error.find("Empty message") != std::string::npos);
 }
 
-TEST_CASE("parse_message - message with separator (single chunk)", "[parse_message]") {
-    std::string msg = "POST}+{Alice}+{Title}+{Msg1}#{POST}+{Bob}+{Title2}+{Msg2}";
+TEST_CASE("parse_message - POST with multiple triples", "[parse_message]") {
+    // Simple test: Two separate (author, title, message) triples in a single POST
+    std::string msg = "POST}+{Alice}+{TitleA}+{MsgA}#{Bob}+{TitleB}+{MsgB}";
     
     auto result = parse_message(msg, "}+{", "}#{", "}}&{{");
     
-    // Should parse only up to the separator
     REQUIRE(result.ok == true);
-    REQUIRE(result.posts.size() == 1);  // Only first post
+    REQUIRE(result.posts.size() == 2);
     REQUIRE(result.posts[0].author == "Alice");
+    REQUIRE(result.posts[0].title == "TitleA");
+    REQUIRE(result.posts[0].message == "MsgA");
+    REQUIRE(result.posts[1].author == "Bob");
+    REQUIRE(result.posts[1].title == "TitleB");
+    REQUIRE(result.posts[1].message == "MsgB");
 }
 
 // ============================================================================
