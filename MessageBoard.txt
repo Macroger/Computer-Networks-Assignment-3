@@ -1,0 +1,5 @@
+Charlie|Announcement|This is a test message to check the UI layout.|999
+Charlie|Testing 123|The quick brown fox jumps over the lazy dog.|999
+Ivy|Discussion|UI stress test message number X.|999
+Henry|Random Thought|Checking how the interface handles multiple posts.|999
+Charlie|Discussion|Checking how the interface handles multiple posts.|999
