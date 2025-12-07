@@ -11,7 +11,7 @@ real-time FTXUI GUI dashboard featuring:
   ✓ Multi-client concurrent handling (thread-per-connection)
   ✓ Thread-safe shared data with mutexes
   ✓ Real-time GUI with 4 tabs (Message Board, Event Log, Clients, Stats)
-  ✓ Intelligent pagination (7 items per page, Previous/Next buttons)
+  ✓ Intelligent pagination (5 items per page, Previous/Next buttons)
   ✓ Message filtering by title and author
   ✓ Reversed message order (newest first)
   ✓ Smart notifications ("New messages available" banner)
@@ -20,6 +20,9 @@ real-time FTXUI GUI dashboard featuring:
   ✓ Graceful server shutdown with goodbye messages
   ✓ Test data generation button
   ✓ Event logging with timestamps and raw message display
+  ✓ Dynamic page count based on filter results
+  ✓ GET_BOARD response logging for client debugging
+  ✓ Responsive filter buttons that don't squish with growing content
   ✓ Comprehensive unit tests (31/32 passing)
   ✓ Automated build system
   ✓ Complete documentation

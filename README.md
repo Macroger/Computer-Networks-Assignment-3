@@ -99,13 +99,14 @@ The server will start listening on port 26500 in the background, and the GUI das
 ## GUI Features
 
 ### Tabbed Interface
-- **Message Board**: Displays all posted messages with pagination (7 messages per page). Shows newest messages first. Includes filtering by title and author with "Apply Filters" and "Clear Filters" buttons.
+- **Message Board**: Displays all posted messages with pagination (5 messages per page, dynamically adjusted for filters). Shows newest messages first. Includes filtering by title and author with "Apply Filters" and "Clear Filters" buttons. Page count updates to reflect filtered results.
 - **Event Log**: Real-time event tracking (connections, disconnections, posts, errors) with 7 events per page.
 - **Connected Clients**: Lists all currently connected clients with their IDs.
 - **Stats**: Displays server statistics (active connections, total messages, messages received).
 
 ### Smart Navigation
 - **Pagination**: Browse messages and events page by page with Previous/Next buttons
+- **Dynamic Filtering**: Page counter updates to show correct total pages based on active filters
 - **Jump to Latest**: Instantly jump to the first page when new messages arrive
 - **New Message Banner**: Yellow notification banner appears when new content arrives while viewing older pages
 - **Colored Tabs**: Magenta (Board), Cyan (Log), Yellow (Clients), Blue (Stats)
