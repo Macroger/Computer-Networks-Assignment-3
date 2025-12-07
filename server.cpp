@@ -709,6 +709,22 @@ std::string handle_post_error(const std::string& errorMessage)
 }
 
 // ============================================================================
+// UTILITY: TRUNCATE LONG STRINGS FOR LOGGING
+// ============================================================================
+
+/// @brief Truncates a string to a maximum length, appending "..." if truncated
+/// Useful for logging long wire-format responses without flooding output
+/// @param str The string to potentially truncate
+/// @param max_len Maximum length before truncation (default 80 chars)
+/// @return Truncated string with "..." appended if it exceeded max_len
+static std::string truncate_for_log(const std::string& str, size_t max_len = 80) {
+    if (str.length() <= max_len) {
+        return str;
+    }
+    return str.substr(0, max_len) + "...";
+}
+
+// ============================================================================
 // CLIENT REQUEST DISPATCHER AND HANDLER
 // ============================================================================
 
@@ -752,6 +768,10 @@ void handle_client_request(const ParseResult& parsed, int CommunicationSocket, i
             
             // Get the formatted message board (with optional filters applied)
             std::string response = get_board_handler(parsed.filter_author, parsed.filter_title);
+            
+            // Log the response being sent (truncated for readability)
+            std::string truncated_response = truncate_for_log(response, 120);
+            g_serverState.logEvent("GET_BOARD_RESPONSE", "Sending board to client (size: " + std::to_string(response.size()) + " bytes)", truncated_response);
             
             // Send the board to the client
             send_all_bytes(CommunicationSocket, response.c_str(), response.size(), 0);

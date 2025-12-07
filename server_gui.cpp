@@ -42,8 +42,8 @@ int main() {
   // Pagination state for each tab
   int current_page = 0;          // Current page for Message Board
   int current_log_page = 0;      // Current page for Event Log
-  const int POSTS_PER_PAGE = 7;  // 7 messages per page
-  const int EVENTS_PER_PAGE = 7; // 7 events per page
+  const int POSTS_PER_PAGE = 5;  // 5 messages per page (reduced to prevent overflow)
+  const int EVENTS_PER_PAGE = 5; // 5 events per page (reduced to prevent overflow)
   
   // Track how many messages/events the user has seen to detect new content
   size_t last_displayed_message_count = 0; // Count when user last viewed page 0
@@ -302,38 +302,44 @@ int main() {
     // ========================================================================
     if (selected_tab == 0) {
       Elements message_elements;
+      int total_filtered_posts = 0;  // Track filtered count for page display
+      int total_pages = 0;           // Track total pages for page display
+      
       {
         std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
         
-        // Handle empty board case
-        if (g_serverState.messageBoard.empty()) {
-          message_elements.push_back(text("(No messages yet)") | dim);
+        // BUILD FILTERED MESSAGE LIST (do this first, regardless of empty check)
+        // Iterate backwards through board (newest first) and collect indices of matching posts
+        std::vector<int> filtered_indices;
+        for (int i = (int)g_serverState.messageBoard.size() - 1; i >= 0; i--) {
+          const auto& post = g_serverState.messageBoard[i];
+          // Check if post matches both title and author filters
+          bool title_match = filter_title.empty() || post.title.find(filter_title) != std::string::npos;
+          bool author_match = filter_author.empty() || post.author.find(filter_author) != std::string::npos;
+          if (title_match && author_match) {
+            filtered_indices.push_back(i);
+          }
+        }
+        
+        // CALCULATE PAGINATION ON FILTERED RESULTS
+        total_filtered_posts = filtered_indices.size();
+        total_pages = (total_filtered_posts + POSTS_PER_PAGE - 1) / POSTS_PER_PAGE;
+        if (total_pages == 0) total_pages = 1;  // Always show at least page 1
+        
+        // Clamp current page to valid range and avoid negative page when no matches
+        if (total_filtered_posts == 0) {
+          current_page = 0;
+        } else if (current_page >= total_pages) {
+          current_page = total_pages - 1;
+        }
+        
+        // Handle empty filtered list
+        if (total_filtered_posts == 0) {
+          message_elements.push_back(text("(No messages match filter)") | dim);
         } else {
-          // BUILD FILTERED MESSAGE LIST
-          // Iterate backwards through board (newest first) and collect indices of matching posts
-          std::vector<int> filtered_indices;
-          for (int i = (int)g_serverState.messageBoard.size() - 1; i >= 0; i--) {
-            const auto& post = g_serverState.messageBoard[i];
-            // Check if post matches both title and author filters
-            bool title_match = filter_title.empty() || post.title.find(filter_title) != std::string::npos;
-            bool author_match = filter_author.empty() || post.author.find(filter_author) != std::string::npos;
-            if (title_match && author_match) {
-              filtered_indices.push_back(i);
-            }
-          }
-          
-          // CALCULATE PAGINATION ON FILTERED RESULTS
-          int total_posts = filtered_indices.size();
-          int total_pages = (total_posts + POSTS_PER_PAGE - 1) / POSTS_PER_PAGE;
-          
-          // Clamp current page to valid range (handles case where filter reduces results)
-          if (current_page >= total_pages) {
-            current_page = total_pages - 1;
-          }
-          
           // Calculate which filtered posts to display on current page
           int start_idx = current_page * POSTS_PER_PAGE;
-          int end_idx = std::min(start_idx + POSTS_PER_PAGE, total_posts);
+          int end_idx = std::min(start_idx + POSTS_PER_PAGE, total_filtered_posts);
           
           // RENDER EACH POST ON CURRENT PAGE
           for (int i = start_idx; i < end_idx; i++) {
@@ -386,6 +392,7 @@ int main() {
       );
       
       // Filter action buttons
+      // Filter action buttons
       viewport_elements.push_back(
         hbox(
           text("  ") | flex,
@@ -397,12 +404,10 @@ int main() {
       );
       
       viewport_elements.push_back(separator());
-      // Page counter
-      viewport_elements.push_back(text("Page " + std::to_string(current_page + 1) + " of " + std::to_string((g_serverState.messageBoard.size() + POSTS_PER_PAGE - 1) / POSTS_PER_PAGE)) | dim | center);
+      // Page counter (now uses filtered page count)
+      viewport_elements.push_back(text("Page " + std::to_string(current_page + 1) + " of " + std::to_string(total_pages)) | dim | center);
       viewport_elements.push_back(separator());
-      viewport_elements.push_back(vbox(message_elements));
-      
-      viewport_content = vbox(viewport_elements);
+      viewport_elements.push_back(vbox(message_elements));      viewport_content = vbox(viewport_elements);
     }
 
     // ========================================================================
@@ -609,24 +614,20 @@ int main() {
         separator()
       ) | notflex,
       
-      // Main viewport (takes up middle space)
+      // Main viewport (takes remaining space)
       vbox(
         viewport_content | border | size(HEIGHT, LESS_THAN, 40)
       ),
       
-      // Bottom sections (fixed size - doesn't flex)
+      // Bottom sections (compressed for smaller terminals)
       vbox(
-        separator(),
-        
-        // Recent TCP activity panel (fixed size)
+        // Recent TCP activity panel (fixed height, scrollable)
         vbox(
           text("Recent TCP Activity") | bold | center,
-          vbox(alert_elements) | border | size(HEIGHT, LESS_THAN, 8)
-        ) | size(HEIGHT, LESS_THAN, 10),
+          vbox(alert_elements) | border | size(HEIGHT, EQUAL, 6)
+        ) | size(HEIGHT, EQUAL, 8) | notflex,
         
-        separator(),
-        
-        // Placeholder for button area
+        // Placeholder for button area (minimal space)
         text("")
       ) | notflex
     );
@@ -669,23 +670,23 @@ int main() {
       text("  ") | flex,
       
       // Previous page button (left-aligned)
-      prev_page_button->Render() | size(WIDTH, GREATER_THAN, 12) | size(HEIGHT, GREATER_THAN, 3),
+      prev_page_button->Render() | size(WIDTH, GREATER_THAN, 12),
       text("  "),
       
       // Test data generation button
-      test_posts_button->Render() | size(WIDTH, GREATER_THAN, 15) | size(HEIGHT, GREATER_THAN, 3),
+      test_posts_button->Render() | size(WIDTH, GREATER_THAN, 15),
       text("  "),
       
       // Jump to latest content button
-      jump_to_latest_button->Render() | size(WIDTH, GREATER_THAN, 14) | size(HEIGHT, GREATER_THAN, 3),
+      jump_to_latest_button->Render() | size(WIDTH, GREATER_THAN, 14),
       text("  "),
       
       // Shutdown server button
-      shutdown_button->Render() | size(WIDTH, GREATER_THAN, 17) | size(HEIGHT, GREATER_THAN, 3),
+      shutdown_button->Render() | size(WIDTH, GREATER_THAN, 17),
       text("  "),
       
       // Next page button (right-aligned)
-      next_page_button->Render() | size(WIDTH, GREATER_THAN, 8) | size(HEIGHT, GREATER_THAN, 3),
+      next_page_button->Render() | size(WIDTH, GREATER_THAN, 8),
       
       // Right padding with flex
       text("  ") | flex
