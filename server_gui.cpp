@@ -42,8 +42,8 @@ int main() {
   // Pagination state for each tab
   int current_page = 0;          // Current page for Message Board
   int current_log_page = 0;      // Current page for Event Log
-  const int POSTS_PER_PAGE = 5;  // 5 messages per page (reduced to prevent overflow)
-  const int EVENTS_PER_PAGE = 5; // 5 events per page (reduced to prevent overflow)
+  const int POSTS_PER_PAGE = 4;  // 4 messages per page (reduced to prevent viewport expansion)
+  const int EVENTS_PER_PAGE = 4; // 4 events per page (reduced to prevent viewport expansion)
   
   // Track how many messages/events the user has seen to detect new content
   size_t last_displayed_message_count = 0; // Count when user last viewed page 0
@@ -368,20 +368,21 @@ int main() {
       }
       
       // BUILD VIEWPORT LAYOUT FOR MESSAGE BOARD TAB
-      Elements viewport_elements;
-      viewport_elements.push_back(text("Message Board") | bold | color(Color::Magenta) | center);
-      viewport_elements.push_back(separator());
+      // Fixed header/filter section (doesn't flex)
+      Elements fixed_header;
+      fixed_header.push_back(text("Message Board") | bold | color(Color::Magenta) | center);
+      fixed_header.push_back(separator());
       
       // Show banner if new messages exist and we're not viewing page 1
       if (has_new_messages && current_page > 0) {
-        viewport_elements.push_back(
+        fixed_header.push_back(
           text("[!] New messages available") | bold | color(Color::Yellow) | center
         );
-        viewport_elements.push_back(separator());
+        fixed_header.push_back(separator());
       }
       
       // Filter input fields
-      viewport_elements.push_back(
+      fixed_header.push_back(
         hbox(
           text("Title: ") | color(Color::Yellow),
           filter_title_input->Render() | flex,
@@ -392,8 +393,7 @@ int main() {
       );
       
       // Filter action buttons
-      // Filter action buttons
-      viewport_elements.push_back(
+      fixed_header.push_back(
         hbox(
           text("  ") | flex,
           apply_filters_button->Render() | size(WIDTH, GREATER_THAN, 13),
@@ -403,11 +403,16 @@ int main() {
         ) | size(HEIGHT, EQUAL, 3)
       );
       
-      viewport_elements.push_back(separator());
+      fixed_header.push_back(separator());
       // Page counter (now uses filtered page count)
-      viewport_elements.push_back(text("Page " + std::to_string(current_page + 1) + " of " + std::to_string(total_pages)) | dim | center);
-      viewport_elements.push_back(separator());
-      viewport_elements.push_back(vbox(message_elements));      viewport_content = vbox(viewport_elements);
+      fixed_header.push_back(text("Page " + std::to_string(current_page + 1) + " of " + std::to_string(total_pages)) | dim | center);
+      fixed_header.push_back(separator());
+      
+      // Assemble: fixed header + flexible message area
+      viewport_content = vbox({
+        vbox(fixed_header) | notflex,
+        vbox(message_elements)
+      });
     }
 
     // ========================================================================
@@ -614,10 +619,10 @@ int main() {
         separator()
       ) | notflex,
       
-      // Main viewport (takes remaining space)
+      // Main viewport (height capped to prevent button squishing, no flex)
       vbox(
-        viewport_content | border | size(HEIGHT, LESS_THAN, 40)
-      ),
+        viewport_content | border | size(HEIGHT, LESS_THAN, 28)
+      ) | notflex,
       
       // Bottom sections (compressed for smaller terminals)
       vbox(
