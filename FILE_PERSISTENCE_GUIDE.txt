@@ -1,0 +1,277 @@
+================================================================================
+FILE PERSISTENCE INTEGRATION GUIDE
+How to Add File Saving to the Message Board Server
+================================================================================
+
+INTEGRATION GUIDE FOR FILE SAVING FEATURE
+
+Your codebase is well-architected, and adding file saving is actually 
+straightforward. Here's how to think about it:
+
+================================================================================
+THE CORE ARCHITECTURE (SIMPLIFIED)
+================================================================================
+
+The system has ONE CENTRAL SHARED STATE (shared_state.h):
+
+    g_serverState
+      ├── messageBoard (vector<Post>)
+      ├── boardMutex (protects access)
+      └── logEvent() function
+
+Every post that gets added goes through post_handler() in server.cpp, which 
+ALREADY locks the mutex before modifying the message board. This is your 
+hook point.
+
+================================================================================
+WHERE TO ADD FILE SAVING
+================================================================================
+
+OPTION 1: SIMPLEST APPROACH (RECOMMENDED)
+
+Add file saving RIGHT AFTER posts are added in post_handler():
+
+    bool post_handler(const ParseResult& parsed, std::string& errorDetails, 
+                      int clientId)
+    {
+        std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
+        
+        // ... existing code that adds posts ...
+        
+        // NEW: After posts are safely added, save to disk
+        if (!save_board_to_file(g_serverState.messageBoard)) {
+            // Handle save failure (log it, but don't fail the POST)
+            g_serverState.logEvent("SAVE_WARNING", 
+                "Failed to write messages to disk");
+        }
+        
+        return true;
+    }
+
+PROS:
+  - Posts are already safely in the shared messageBoard
+  - You're already inside the mutex lock, so no race conditions
+  - Minimal changes needed
+
+CONS:
+  - File I/O happens while holding the mutex (blocks other clients briefly)
+  - If disk is slow, clients might see latency
+
+---
+
+OPTION 2: ASYNC APPROACH (MORE COMPLEX)
+
+Save in a separate thread that watches for changes:
+
+    // In main thread (or another thread)
+    while (server_running) {
+        if (messageBoard_changed) {
+            std::lock_guard<std::mutex> lock(boardMutex);
+            save_board_to_file(g_serverState.messageBoard);
+            messageBoard_changed = false;
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+
+PROS:
+  - Doesn't block POST requests
+  - Can batch saves (don't write on every message)
+
+CONS:
+  - More complex (extra thread, sync flag)
+  - Messages might not be persisted immediately if server crashes
+
+================================================================================
+WHAT YOUR TEAMMATE NEEDS TO KNOW
+================================================================================
+
+1. THE messageBoard IS THE SINGLE SOURCE OF TRUTH
+   - Every message lives here
+   - Protect it with the mutex when reading/writing
+   - When loading from disk, populate this vector on startup
+
+2. CRITICAL SECTIONS (NEED MUTEX PROTECTION)
+   
+   std::lock_guard<std::mutex> lock(g_serverState.boardMutex);
+   // Safe to read/write messageBoard here
+
+3. WHEN TO SAVE
+   - On each POST (Option 1) = always persistent
+   - Periodically (Option 2) = less overhead, but riskier
+
+4. WHEN TO LOAD
+   - Before the GUI starts (in main() before spawning threads)
+   - After socket bind but before accept loop starts
+
+5. THE POST STRUCTURE (from shared_state.h)
+   
+   struct Post {
+       std::string author;
+       std::string title;
+       std::string message;
+       int clientId = 0;
+   };
+   
+   Keep this format consistent when saving/loading (JSON, CSV, binary, etc.)
+
+================================================================================
+MINIMAL WORKING EXAMPLE
+================================================================================
+
+IN shared_state.h - ADD THESE FUNCTION DECLARATIONS:
+
+    bool save_board_to_file(const std::vector<Post>& board);
+    bool load_board_from_file(std::vector<Post>& board);
+
+---
+
+IN server.cpp - ADD IMPLEMENTATIONS:
+
+    bool save_board_to_file(const std::vector<Post>& board) {
+        std::ofstream file("message_board.txt");
+        if (!file) return false;
+        
+        for (const auto& post : board) {
+            file << post.author << "|" << post.title << "|" 
+                 << post.message << "|" << post.clientId << "\n";
+        }
+        return true;
+    }
+    
+    bool load_board_from_file(std::vector<Post>& board) {
+        std::ifstream file("message_board.txt");
+        if (!file) return false;  // File doesn't exist yet, that's OK
+        
+        std::string line;
+        while (std::getline(file, line)) {
+            // Parse line and create Post
+            // Split by "|" delimiter
+            Post p;
+            // ... populate p.author, p.title, p.message, p.clientId ...
+            board.push_back(p);
+        }
+        return true;
+    }
+
+---
+
+IN main() - LOAD ON STARTUP:
+
+    int main() {
+        load_board_from_file(g_serverState.messageBoard);
+        // Before threads start!
+        
+        // ... rest of main ...
+    }
+
+---
+
+IN post_handler() - SAVE AFTER ADDING:
+
+    bool post_handler(...) {
+        // ... add posts ...
+        save_board_to_file(g_serverState.messageBoard);
+        return true;
+    }
+
+================================================================================
+THE KEY INSIGHT
+================================================================================
+
+You've done the hard part (threading, synchronization). Your teammate just 
+needs to:
+
+1. Read g_serverState.messageBoard 
+2. Write it to a file (with mutex protection)
+3. Read it back on startup
+
+No new networking, no new parsing, no new threading—just file I/O around 
+the existing shared data.
+
+================================================================================
+RECOMMENDED FILE FORMAT
+================================================================================
+
+Option A: SIMPLE TEXT (pipe-delimited)
+  author|title|message|clientId
+  Alice|Hello|Hi there|1
+  Bob|Question|Why?|2
+
+  Pros: Human-readable, easy to parse
+  Cons: Doesn't handle special characters well (need escaping)
+
+---
+
+Option B: JSON
+  [
+    {"author": "Alice", "title": "Hello", "message": "Hi there", 
+     "clientId": 1},
+    {"author": "Bob", "title": "Question", "message": "Why?", 
+     "clientId": 2}
+  ]
+
+  Pros: Structured, handles any characters, standard format
+  Cons: Requires JSON library (not in standard C++17, but easy to find)
+
+---
+
+Option C: BINARY
+  [Binary serialization of vector<Post>]
+
+  Pros: Compact, fast
+  Cons: Not human-readable, harder to debug
+
+================================================================================
+TESTING THE INTEGRATION
+================================================================================
+
+1. Start the server, add a few test messages
+2. Shutdown the server (button or Ctrl+C)
+3. Look for message_board.txt (or your chosen file)
+4. Verify the file contains the messages
+5. Restart the server
+6. Check that messages are reloaded and displayed
+7. Add more messages
+8. Repeat to verify persistence works
+
+================================================================================
+DEBUGGING TIPS
+================================================================================
+
+If saves/loads aren't working:
+
+1. Check file permissions
+   - Can the process write to the current directory?
+   - Use absolute paths if relative ones fail: "/tmp/message_board.txt"
+
+2. Add logging
+   - Use g_serverState.logEvent() to log save/load status
+   - Will show up in Event Log tab for debugging
+
+3. Check mutex protection
+   - Make sure you ALWAYS use std::lock_guard when accessing messageBoard
+   - Even for reads! (vector can be resized during iteration)
+
+4. Handle missing file gracefully
+   - If no save file exists yet, that's fine—start with empty board
+   - Don't crash if file can't be opened
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+Hand this guide to your teammate along with:
+  1. Definitions of Post struct (from shared_state.h)
+  2. Example of how post_handler() uses mutex (from server.cpp)
+  3. Pointer to where main() starts (around line 1120 in server_gui.cpp)
+
+Your teammate can then implement:
+  1. save_board_to_file() function
+  2. load_board_from_file() function
+  3. Call to load_board_from_file() in main()
+  4. Call to save_board_to_file() in post_handler()
+
+This is a contained, focused task with clear boundaries—no need to understand 
+the entire GUI or networking code.
+
+================================================================================

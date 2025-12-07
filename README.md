@@ -2,14 +2,14 @@
 
 ## Overview
 
-This project implements a simple TCP-based message-board service (server + client). The server accepts requests from clients and responds with requested resources (posts). Clients can:
+This project implements a TCP-based message-board server with a real-time GUI dashboard. The server accepts requests from clients and responds with requested resources (posts). Clients can:
 
 - POST one or multiple messages to the board
 - GET the entire board
 - GET posts filtered by `Author` and/or `Title`
 - QUIT the session
 
-Each post/message is represented as a single string that contains three component fields: `Author`, `Title`, and `Message`. Fields are separated using a custom delimiter. The server parses incoming messages, stores posts in memory (and optionally persists them later), and returns responses over TCP.
+The server runs in a background thread while a real-time FTXUI-based GUI dashboard displays live statistics, message board activity, event logs, and connected clients.
 
 ## Protocol Summary
 
@@ -35,8 +35,7 @@ Note: All of the delimiters above are literal text sequences to be parsed by the
 
 - `POST_OK` — Server confirms the POST succeeded.
 - `POST_ERROR` — Server signals an error processing the POST.
-
-Responses may be plain text strings (simple) or a small structured response format — the chosen implementation is kept intentionally simple for the assignment.
+- `SERVER SHUTDOWN` — Server is shutting down gracefully.
 
 ## Message Formats and Examples
 
@@ -80,67 +79,67 @@ GET_BOARD}+{ }+{First post}}&{{
 - For `GET_BOARD` the server filters stored posts by `Author` and/or `Title` when provided; if both filters are empty, it returns the whole board.
 - For `QUIT` the server ends the session for that client connection.
 
-## Build & Run (example)
+## Build & Run
 
-Build the current `server.cpp` with `g++` (C++17):
-
-```bash
-g++ -std=c++17 -O2 server.cpp -o server
-```
-
-Run the server (default port `26500`):
+Build the integrated server + GUI binary:
 
 ```bash
-./server
+cd /home/macrog/code/School/computer_networks_assignment_3
+./build.sh gui
 ```
 
-You can test with `netcat` (`nc`) or `telnet`. Use `printf` or `echo -n` to send the literal delimiters and termination marker. Example sending a single POST with `nc`:
+Run the server with GUI:
 
 ```bash
-printf 'POST}+{Matt Schatz}+{First post}+{YAY my first post}}&{{' | nc localhost 26500
+./build/server_gui
 ```
 
-Example sending multiple posts in one request:
+The server will start listening on port 26500 in the background, and the GUI dashboard will display in your terminal.
+
+## GUI Features
+
+### Tabbed Interface
+- **Message Board**: Displays all posted messages with pagination (7 messages per page). Shows newest messages first. Includes filtering by title and author with "Apply Filters" and "Clear Filters" buttons.
+- **Event Log**: Real-time event tracking (connections, disconnections, posts, errors) with 7 events per page.
+- **Connected Clients**: Lists all currently connected clients with their IDs.
+- **Stats**: Displays server statistics (active connections, total messages, messages received).
+
+### Smart Navigation
+- **Pagination**: Browse messages and events page by page with Previous/Next buttons
+- **Jump to Latest**: Instantly jump to the first page when new messages arrive
+- **New Message Banner**: Yellow notification banner appears when new content arrives while viewing older pages
+- **Colored Tabs**: Magenta (Board), Cyan (Log), Yellow (Clients), Blue (Stats)
+
+### Message Board Features
+- Real-time updates as clients post messages
+- Newest messages shown first (reverse chronological order)
+- Sequential numbering (#1, #2, etc.) for easy reference
+- Message display shows: Author, Title, Message, Client ID
+- Title and Author filtering with Apply/Clear buttons
+- Page indicator showing current page/total pages
+
+### Event Log Features
+- Color-coded events: Green (CONNECT), Red (DISCONNECT), Yellow (POST), Cyan (GET_BOARD), Red (ERROR)
+- Timestamp for each event
+- Raw wire-format message display for debugging
+- Same pagination and Jump to Latest functionality as Message Board
+
+### Server Control
+- **Add Test Posts**: Generates 5 random test posts instantly (clientId=999) for testing
+- **Shutdown Server**: Gracefully shuts down the server, sends goodbye message to all connected clients, and closes the application
+
+## Testing
+
+Run the unit test suite:
 
 ```bash
-printf 'POST}+{Matt Schatz}+{First post}+{YAY my first post}#{Matt Schatz}+{My second post!}+{Heres the contents of my second posting!}}&{{' | nc localhost 26500
+./build.sh tests
 ```
 
-Example GET for the whole board:
-
-```bash
-printf 'GET_BOARD}+{ }+{ }}}&{{' | nc localhost 26500
-```
-
-(Replace `26500` with `27000` if your team standardizes on that port.)
-
-## Parsing rules (implementation notes)
-
-- Read incoming bytes until the exact sequence `}}&{{` appears; treat the preceding content as the full message body.
-- Split the body by `}#{` to get individual post entries (only for `POST` requests). If not `POST`, skip this step.
-- For each post entry, split by `}+{` into exactly three parts: `Author`, `Title`, `Message`. Trim whitespace if desired.
-- If splitting fails (not enough parts) the server should treat that as a `POST_ERROR` and respond accordingly.
-
-## Storage
-
-- Current design stores posts in-memory in a vector/list of small structs like `(id, author, title, message, timestamp)`.
-- If persistence is required, an append-only file (one JSON-line per post) or an embedded DB like `sqlite3` can be added.
-
-## Concurrency and Scaling (future)
-
-- Assignment baseline: single-connection handling is acceptable.
-- Extra credit: accept multiple clients using either a thread-per-connection model with `std::thread` or an event-driven `select`/`poll`/`epoll` loop.
-- For concurrent writes, protect shared in-memory structures with `std::mutex`.
-
-## Next Steps / TODOs
-
-- Decide final port: `26500` or `27000`.
-- Improve frame robustness (e.g., length-prefixed messages) if needed.
-- Add unit tests for parsing and handler logic.
-- Add a simple client program to exercise POST/GET and parsing.
-- Add persistence (file or sqlite) if required by grading rubric.
-
-## Contacts
-
-- Project author/owner: Matthew G. Schatz (as in `server.cpp`).
-- Team: server-side and client-side groups — please coordinate on the final message framing and port number before implementing the client.
+All 31 unit tests should pass, covering:
+- Protocol parsing (GET_BOARD, POST, QUIT, INVALID_COMMAND)
+- Multiple client handling
+- Thread-safe operations
+- Message filtering
+- Error conditions 
+---
