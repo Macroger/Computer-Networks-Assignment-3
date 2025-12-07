@@ -6,6 +6,7 @@
 #include <mutex>
 #include <deque>
 #include <chrono>
+#include <iostream>
 
 const std::string MESSAGEBOARD_FILE = "MessageBoard.txt";
 
@@ -63,85 +64,70 @@ struct SharedServerState {
             eventLog.pop_front();
         }
     }
+    
+    /// @brief Load message board from file at startup
+    void loadFromFile() {
+        std::lock_guard<std::mutex> lock(boardMutex);
+        
+        std::ifstream file(MESSAGEBOARD_FILE);
+        if (!file.is_open()) {
+            // File doesn't exist yet, start fresh
+            logEvent("SYSTEM", "No saved messages found, starting with empty board");
+            return;
+        }
+        
+        messageBoard.clear();
+        std::string line;
+        
+        while (std::getline(file, line)) {
+            if (line.empty()) continue;
+            
+            // Expected format per post:
+            // AUTHOR|TITLE|MESSAGE|CLIENTID
+            std::istringstream iss(line);
+            std::string author, title, message, clientIdStr;
+            
+            if (std::getline(iss, author, '|') &&
+                std::getline(iss, title, '|') &&
+                std::getline(iss, message, '|') &&
+                std::getline(iss, clientIdStr, '|')) {
+                
+                Post p;
+                p.author = author;
+                p.title = title;
+                p.message = message;
+                p.clientId = std::stoi(clientIdStr);
+                
+                messageBoard.push_back(p);
+            }
+        }
+        
+        file.close();
+        logEvent("SYSTEM", "Loaded " + std::to_string(messageBoard.size()) + " messages from file");
+    }
+    
+    /// @brief Save message board to file
+    void saveToFile() {
+        std::lock_guard<std::mutex> lock(boardMutex);
+        
+        std::ofstream file(MESSAGEBOARD_FILE);
+        if (!file.is_open()) {
+            logEvent("ERROR", "Failed to save messages to file");
+            return;
+        }
+        
+        for (const auto& post : messageBoard) {
+            // Format: AUTHOR|TITLE|MESSAGE|CLIENTID
+            file << post.author << "|"
+                 << post.title << "|"
+                 << post.message << "|"
+                 << post.clientId << "\n";
+        }
+        
+        file.close();
+        logEvent("SYSTEM", "Saved " + std::to_string(messageBoard.size()) + " messages to file");
+    }
 };
 
 /// @brief Global shared state instance
 extern SharedServerState g_serverState;
-
-struct Message {
-    std::string author;
-    std::string content;
-};
-
-class MessageBoard {
-private:
-    std::vector<Message> messages;
-
-public:
-    // Load messages from file at startup
-    void loadFromFile() {
-        std::ifstream file(MESSAGEBOARD_FILE);
-        if (!file.is_open()) {
-            // File doesn't exist yet, start fresh
-            return;
-        }
-        
-        std::string line;
-        Message currentMessage;
-        bool readingAuthor = true;
-        
-        while (std::getline(file, line)) {
-            if (line == "---") {
-                // Message separator
-                if (!currentMessage.author.empty()) {
-                    messages.push_back(currentMessage);
-                    currentMessage = Message();
-                }
-                readingAuthor = true;
-            } else if (readingAuthor) {
-                currentMessage.author = line;
-                readingAuthor = false;
-            } else {
-                currentMessage.content = line;
-            }
-        }
-        
-        // Add last message if exists
-        if (!currentMessage.author.empty()) {
-            messages.push_back(currentMessage);
-        }
-        
-        file.close();
-    }
-    
-    // Save messages to file at shutdown
-    void saveToFile() {
-        std::ofstream file(MESSAGEBOARD_FILE);
-        if (!file.is_open()) {
-            return;
-        }
-        
-        for (const auto& msg : messages) {
-            file << msg.author << "\n";
-            file << msg.content << "\n";
-            file << "---\n";
-        }
-        
-        file.close();
-    }
-    
-    // Add a new message
-    void addMessage(const std::string& author, const std::string& content) {
-        messages.push_back({author, content});
-    }
-    
-    // Get all messages
-    const std::vector<Message>& getMessages() const {
-        return messages;
-    }
-    
-    // Clear all messages
-    void clear() {
-        messages.clear();
-    }
-};
