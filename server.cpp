@@ -1,7 +1,7 @@
 /*
 ** Filename: server.cpp
 ** Project: Computer Networks Assignment 3
-** Author: Matthew G. Schatz
+** Author: Matthew G. Schatz, Kian Cloutier
 ** Description: This is a TCP server that works as a message board. It listens for incomming connections
 **              from clients, receives a request message, and sends back a response to the client containing
 **              the requested resource(s).
@@ -1038,6 +1038,7 @@ void server_run_loop()
     // Bind the socket to the configured address and port
     if (bind(ListeningSocket, (struct sockaddr*)&SvrAddr, sizeof(SvrAddr)) == SOCKET_ERROR)
     {
+        std::cerr << "ERROR: Failed to bind ServerSocket: " << strerror(errno) << std::endl;
         close(ListeningSocket);
         g_serverState.logEvent("ERROR", "Failed to bind ServerSocket: " + std::string(strerror(errno)));
         return;
@@ -1050,6 +1051,7 @@ void server_run_loop()
     // Put the socket in listening mode (backlog of 1 connection)
     if (listen(ListeningSocket, 1) == SOCKET_ERROR)
     {
+        std::cerr << "ERROR: Failed to configure listen on ServerSocket: " << strerror(errno) << std::endl;
         close(ListeningSocket);
         g_serverState.logEvent("ERROR", "Failed to configure listen on ServerSocket: " + std::string(strerror(errno)));
         return;
