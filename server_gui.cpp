@@ -13,6 +13,9 @@ using namespace ftxui;
 // Forward declaration - defined in server.cpp
 extern void server_run_loop();
 
+// Global access to the message board object
+extern MessageBoard globalMessageBoard;
+
 int main() {
   // Spawn the server in a background thread so it accepts connections while GUI runs in main thread
   std::thread server_thread(server_run_loop);
@@ -749,4 +752,16 @@ int main() {
 
   // Exit successfully
   return 0;
+}
+
+void setupGUI() {
+    // Load messages from file at startup
+    globalMessageBoard.loadFromFile();
+    print_log("Messages loaded from " + std::string(MESSAGEBOARD_FILE));
+}
+
+void cleanupGUI() {
+    // Save messages to file before shutdown
+    globalMessageBoard.saveToFile();
+    print_log("Messages saved to " + std::string(MESSAGEBOARD_FILE));
 }
