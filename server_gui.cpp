@@ -14,9 +14,9 @@ using namespace ftxui;
 extern void server_run_loop();
 
 // Global access to the message board object
-extern MessageBoard globalMessageBoard;
 
 int main() {
+  g_serverState.loadFromFile();
   // Spawn the server in a background thread so it accepts connections while GUI runs in main thread
   std::thread server_thread(server_run_loop);
   server_thread.detach();  // Let server run independently (we don't need to wait for it)
@@ -749,7 +749,9 @@ int main() {
 
   // Give the server thread time to finish cleanup (close sockets, close listening socket, etc)
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
+  
+  //save
+  g_serverState.saveToFile();
   // Exit successfully
   return 0;
 }
