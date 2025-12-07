@@ -30,7 +30,7 @@ KEY COMPONENTS
      * Connected client count
      * Total message count
      * Messages received counter
-     * Full message board with scrolling
+     * Full message board with pagination
    - Thread-safe reads from shared messageBoard
 
 HOW IT WORKS
@@ -151,13 +151,13 @@ ARCHITECTURE DIAGRAM
                     ┌────────────────────────────┴────────────┐
                     │  Shared Global State                    │
                     │  g_serverState                          │
-                    │  ┌─────────────────────────────────┐   │
-                    │  │ messageBoard (vector<Post>)     │   │
-                    │  │ boardMutex (std::mutex)         │   │
-                    │  │ activeConnections (int)         │   │
-                    │  │ totalMessagesReceived (int)     │   │
-                    │  │ serverRunning (bool)            │   │
-                    │  └─────────────────────────────────┘   │
+                    │  ┌─────────────────────────────────┐    │
+                    │  │ messageBoard (vector<Post>)     │    │
+                    │  │ boardMutex (std::mutex)         │    │
+                    │  │ activeConnections (int)         │    │
+                    │  │ totalMessagesReceived (int)     │    │
+                    │  │ serverRunning (bool)            │    │
+                    │  └─────────────────────────────────┘    │
                     └─────────────────────────────────────────┘
 
 CODE EXAMPLE: THREAD-SAFE MESSAGE RETRIEVAL IN GUI
@@ -220,9 +220,3 @@ The architecture is:
   - Modular (can run with or without GUI)
   - Scalable (handles multiple concurrent clients)
   - Testable (unit tests verify data integrity)
-
-The server is production-ready for handling multiple clients. The GUI
-integration is architecturally sound and ready for deployment.
-
-Next: Run the integrated binary to see the server handling multiple clients
-while the GUI displays live statistics and messages!
