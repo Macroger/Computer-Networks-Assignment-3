@@ -753,15 +753,3 @@ int main() {
   // Exit successfully
   return 0;
 }
-
-void setupGUI() {
-    // Load messages from file at startup
-    globalMessageBoard.loadFromFile();
-    print_log("Messages loaded from " + std::string(MESSAGEBOARD_FILE));
-}
-
-void cleanupGUI() {
-    // Save messages to file before shutdown
-    globalMessageBoard.saveToFile();
-    print_log("Messages saved to " + std::string(MESSAGEBOARD_FILE));
-}
